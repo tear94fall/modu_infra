@@ -1,0 +1,12 @@
+# 시크릿
+**/.env
+# pinpoint-docker 의 .env 는 원본 저장소 공개 기본값이라 포함한다
+!pinpoint-docker/.env
+!pinpoint-docker/**/.env
+data/mongodb/mongodb.key
+monitoring/mysql/.my.cnf
+
+# 로컬 백업 파일
+*.bak
+
+.DS_Store

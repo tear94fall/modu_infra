@@ -1,0 +1,19 @@
+# modu_messenger 관측성 연동을 위한 로컬 오버라이드.
+# 벤더 파일(docker-compose.yml)을 수정하지 않기 위해 별도 파일로 둔다.
+# docker compose 가 같은 디렉터리의 이 파일을 자동으로 병합한다.
+#
+# pinpoint-mysql 이 호스트 3306 을 요구하는데, modu_messenger 의 mysql-member 가
+# 이미 점유하고 있다. 바인딩이 실패하면 컨테이너가 네트워크에 붙지 못하고,
+# 그 결과 DNS 가 없어 엔트리포인트의 스키마 다운로드가 curl exit 6 으로 죽는다.
+#
+# ports 는 기본적으로 append 병합이라 !override 로 교체해야 원본 3306 이 남지 않는다.
+services:
+  pinpoint-mysql:
+    ports: !override
+      - "13306:3306"
+
+  # pinpoint 의 redis 도 호스트 6379 를 요구하는데 modu_messenger 의 redis 가 이미 쓰고 있다.
+  # pinpoint 내부에서는 pinpoint-redis:6379 로만 접근하므로 호스트 포트는 옮겨도 무방하다.
+  redis:
+    ports: !override
+      - "16379:6379"

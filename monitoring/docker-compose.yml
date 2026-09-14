@@ -1,0 +1,107 @@
+# modu 프로젝트 관측성 스택. 수집 대상은 modu-infra 네트워크의 컨테이너 이름으로 찾는다.
+# 프로젝트 이름(디렉터리 이름) monitoring 을 유지해야 기존 볼륨 monitoring_* 를 그대로 쓴다.
+services:
+  prometheus:
+    image: prom/prometheus:v3.14.0
+    container_name: prometheus
+    ports:
+      - 19090:9090
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    networks:
+      - modu-infra
+    restart: always
+
+  grafana:
+    image: grafana/grafana:13.2.0
+    container_name: grafana
+    ports:
+      - 3000:3000
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    depends_on:
+      - prometheus
+    networks:
+      - modu-infra
+    restart: always
+
+  node-exporter:
+    image: prom/node-exporter:v1.12.1
+    container_name: node-exporter
+    command:
+      - --path.rootfs=/host
+    volumes:
+      - /:/host:ro
+    networks:
+      - modu-infra
+    restart: always
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    container_name: cadvisor
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - modu-infra
+    restart: always
+
+  mysqld-exporter:
+    image: prom/mysqld-exporter:v0.20.0
+    container_name: mysqld-exporter
+    command:
+      - --config.my-cnf=/cfg/.my.cnf
+    volumes:
+      - ./mysql/.my.cnf:/cfg/.my.cnf:ro
+    networks:
+      - modu-infra
+    restart: always
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.90.0
+    container_name: redis-exporter
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    networks:
+      - modu-infra
+    restart: always
+
+  mongodb-exporter:
+    image: percona/mongodb_exporter:0.40
+    container_name: mongodb-exporter
+    command:
+      - --mongodb.uri=${MONGODB_URI}
+      - --collect-all
+    networks:
+      - modu-infra
+    restart: always
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.9.0
+    container_name: kafka-exporter
+    command:
+      - --kafka.server=kafka:9092
+    networks:
+      - modu-infra
+    restart: always
+
+networks:
+  modu-infra:
+    external: true
+
+volumes:
+  prometheus-data:
+  grafana-data:

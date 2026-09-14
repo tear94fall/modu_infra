@@ -1,0 +1,407 @@
+name: modu-data
+
+# modu 프로젝트(modu_messenger, modu_commerce)가 같이 쓰는 데이터 인프라.
+# 컨테이너 이름과 호스트 포트는 고정이다.
+# config-repo, 서비스 환경변수, prometheus 가 이 이름으로 접근하기 때문이다.
+# 이미지는 2026-09-13 에 실행 중이던 버전으로 고정한다.
+# mysql 을 latest 로 두면 9.x 가 받아지는데 8.0 데이터 디렉터리는 9.x 로 바로 올릴 수 없다.
+
+x-mysql-healthcheck: &mysql-healthcheck
+  test: ['CMD-SHELL', 'mysqladmin ping -h 127.0.0.1 -u root --password=$$MYSQL_ROOT_PASSWORD']
+  interval: 10s
+  timeout: 2s
+  retries: 100
+
+x-mysql-messenger: &mysql-messenger
+  image: mysql:8.0.32
+  environment:
+    MYSQL_DATABASE: modu-chat
+    MYSQL_USER: user
+    MYSQL_PASSWORD: ${MYSQL_USER_PASSWORD:?data/.env 에 MYSQL_USER_PASSWORD 를 설정하세요}
+    MYSQL_ROOT_HOST: '%'
+    MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?data/.env 에 MYSQL_ROOT_PASSWORD 를 설정하세요}
+  healthcheck: *mysql-healthcheck
+  networks:
+    - modu-infra
+  restart: unless-stopped
+
+x-mongo: &mongo
+  image: mongo:7.0.8
+  environment:
+    - MONGO_INITDB_ROOT_USERNAME=admin
+    - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:?data/.env 에 MONGO_ROOT_PASSWORD 를 설정하세요}
+  command: ["--keyFile", "./mongodb.key", "--bind_ip_all", "--replSet", "mongo-rs"]
+  networks:
+    - modu-infra
+  restart: unless-stopped
+
+x-redis-node: &redis-node
+  image: redis:7.4.11-alpine
+  # cluster-announce-hostname / cluster-preferred-endpoint-type 은 Redis 7.0+ 에서만 지원된다.
+  # 노드끼리는 nodes.conf 에 저장된 IP 로 통신하므로 컨테이너 재생성으로 IP 가 바뀌면 서로를 잃는다.
+  # 그래서 전용 redis-cluster 네트워크의 고정 IP 를 cluster-announce-ip 로 광고한다.
+  # 클라이언트에게는 호스트명(redis-node-N)도 함께 광고한다(cluster-preferred-endpoint-type hostname).
+  # REDIS_CLUSTER_BOOTSTRAP=1 인 노드(redis-node-1)는 1회용 init 컨테이너 대신 스스로 클러스터를 만든다.
+  # 백그라운드에서 6노드가 모두 PONG 할 때까지 최대 120초 기다린 뒤, 슬롯이 하나도 배정돼 있지 않을 때(최초 1회)만 create 한다.
+  # 백그라운드 쪽이 실패해도 컨테이너는 죽지 않고, redis-server 는 exec 로 PID 를 넘겨받아 stop 신호를 직접 받는다.
+  command:
+    - sh
+    - -ec
+    - |
+      if [ "$${REDIS_CLUSTER_BOOTSTRAP:-0}" = 1 ]; then
+        (
+          deadline=$$(( $$(date +%s) + 120 ))
+          ready=0
+          while [ "$$(date +%s)" -lt "$$deadline" ]; do
+            ready=1
+            for ip in 10.90.0.11 10.90.0.12 10.90.0.13 10.90.0.14 10.90.0.15 10.90.0.16; do
+              [ "$$(timeout 3 redis-cli -h "$$ip" ping 2>/dev/null)" = PONG ] || ready=0
+            done
+            [ "$$ready" = 1 ] && break
+            sleep 1
+          done
+          if [ "$$ready" != 1 ]; then
+            echo "redis cluster bootstrap: nodes not ready within 120s, skipped" >&2
+            exit 1
+          fi
+          if timeout 3 redis-cli -h 10.90.0.11 cluster info | grep -q '^cluster_slots_assigned:0'; then
+            redis-cli --cluster create 10.90.0.11:6379 10.90.0.12:6379 10.90.0.13:6379 10.90.0.14:6379 10.90.0.15:6379 10.90.0.16:6379 --cluster-replicas 1 --cluster-yes
+          else
+            echo "redis cluster already formed"
+          fi
+        ) &
+      fi
+      exec redis-server --port 6379 --cluster-enabled yes --cluster-config-file nodes.conf --cluster-node-timeout 5000 --appendonly yes --cluster-announce-ip "$$REDIS_ANNOUNCE_IP" --cluster-announce-hostname "$$(hostname)" --cluster-preferred-endpoint-type hostname
+  healthcheck:
+    test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+  labels:
+    - "name=redis"
+    - "mode=cluster"
+  restart: unless-stopped
+
+services:
+  mysql-member:
+    <<: *mysql-messenger
+    container_name: mysql-member
+    ports:
+      - 3306:3306
+    volumes:
+      - mysql-member:/var/lib/mysql
+
+  mysql-chat:
+    <<: *mysql-messenger
+    container_name: mysql-chat
+    ports:
+      - 3307:3306
+    volumes:
+      - mysql-chat:/var/lib/mysql
+
+  mysql-push:
+    <<: *mysql-messenger
+    container_name: mysql-push
+    ports:
+      - 3308:3306
+    volumes:
+      - mysql-push:/var/lib/mysql
+
+  mysql-profile:
+    <<: *mysql-messenger
+    container_name: mysql-profile
+    ports:
+      - 3309:3306
+    volumes:
+      - mysql-profile:/var/lib/mysql
+
+  mysql-commerce:
+    image: mysql:8.0.44
+    container_name: mysql-commerce
+    ports:
+      - 3316:3306
+    volumes:
+      - mysql-commerce:/var/lib/mysql
+    environment:
+      MYSQL_DATABASE: commerce
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_ROOT_PASSWORD: ${COMMERCE_DB_PASSWORD:?data/.env 에 COMMERCE_DB_PASSWORD 를 설정하세요}
+    command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    healthcheck: *mysql-healthcheck
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+  mongo-01:
+    <<: *mongo
+    container_name: mongo-01
+    ports:
+      - 27017:27017
+    volumes:
+      - mongo-01:/data/db
+      - ./mongodb/rs-init.sh:/scripts/rs-init.sh
+      - ./mongodb/mongodb.key:/mongodb.key
+
+  mongo-02:
+    <<: *mongo
+    container_name: mongo-02
+    ports:
+      - 27018:27017
+    volumes:
+      - mongo-02:/data/db
+      - ./mongodb/mongodb.key:/mongodb.key
+
+  mongo-03:
+    <<: *mongo
+    container_name: mongo-03
+    ports:
+      - 27019:27017
+    volumes:
+      - mongo-03:/data/db
+      - ./mongodb/mongodb.key:/mongodb.key
+
+  # 단일 노드. develop 의 config-repo 가 spring.data.redis.host=redis 로 쓴다.
+  # IDE 에서 local 프로필로 띄울 때도 localhost:6379 로 이 컨테이너를 쓴다.
+  redis:
+    image: redis:7.2.4-alpine
+    command: redis-server --port 6379
+    container_name: redis
+    hostname: redis
+    labels:
+      - "name=redis"
+      - "mode=standalone"
+    ports:
+      - 6379:6379
+    volumes:
+      - redis-data:/data
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+  # 클러스터 6노드(마스터 3 + 레플리카 3). modu_messenger 의 auth-service·member-service 가 쓴다.
+  redis-node-1:
+    <<: *redis-node
+    container_name: redis-node-1
+    hostname: redis-node-1
+    environment:
+      - REDIS_ANNOUNCE_IP=10.90.0.11
+      - REDIS_CLUSTER_BOOTSTRAP=1
+    # 클러스터 생성용 백그라운드 셸이 끝나면 docker-init 이 좀비 프로세스를 거둔다.
+    init: true
+    # 이 노드가 클러스터를 만들므로 PONG 이 아니라 cluster_state:ok 가 되어야 healthy 로 본다.
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli cluster info | grep -q '^cluster_state:ok'"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+    volumes:
+      - redis-node-1:/data
+    networks:
+      modu-infra:
+      redis-cluster:
+        ipv4_address: 10.90.0.11
+
+  redis-node-2:
+    <<: *redis-node
+    container_name: redis-node-2
+    hostname: redis-node-2
+    environment:
+      - REDIS_ANNOUNCE_IP=10.90.0.12
+    volumes:
+      - redis-node-2:/data
+    networks:
+      modu-infra:
+      redis-cluster:
+        ipv4_address: 10.90.0.12
+
+  redis-node-3:
+    <<: *redis-node
+    container_name: redis-node-3
+    hostname: redis-node-3
+    environment:
+      - REDIS_ANNOUNCE_IP=10.90.0.13
+    volumes:
+      - redis-node-3:/data
+    networks:
+      modu-infra:
+      redis-cluster:
+        ipv4_address: 10.90.0.13
+
+  redis-node-4:
+    <<: *redis-node
+    container_name: redis-node-4
+    hostname: redis-node-4
+    environment:
+      - REDIS_ANNOUNCE_IP=10.90.0.14
+    volumes:
+      - redis-node-4:/data
+    networks:
+      modu-infra:
+      redis-cluster:
+        ipv4_address: 10.90.0.14
+
+  redis-node-5:
+    <<: *redis-node
+    container_name: redis-node-5
+    hostname: redis-node-5
+    environment:
+      - REDIS_ANNOUNCE_IP=10.90.0.15
+    volumes:
+      - redis-node-5:/data
+    networks:
+      modu-infra:
+      redis-cluster:
+        ipv4_address: 10.90.0.15
+
+  redis-node-6:
+    <<: *redis-node
+    container_name: redis-node-6
+    hostname: redis-node-6
+    environment:
+      - REDIS_ANNOUNCE_IP=10.90.0.16
+    volumes:
+      - redis-node-6:/data
+    networks:
+      modu-infra:
+      redis-cluster:
+        ipv4_address: 10.90.0.16
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka-broker-1
+    container_name: kafka
+    ports:
+      - "29092:29092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://localhost:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    # kafka-data 의 meta.properties cluster.id 가 zookeeper-data 에 저장된 값과 같아야 뜬다.
+    # 두 볼륨은 짝이므로 한쪽만 지우거나 교체하지 않는다.
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:v0.7.2
+    ports:
+      - 9009:8080
+    depends_on:
+      - zookeeper
+      - kafka
+    environment:
+      KAFKA_CLUSTERS_0_NAME: kafka-ui
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+  # 커넥터 설정·오프셋·상태는 kafka 토픽(debezium-config/offset/status)에 저장된다.
+  debezium:
+    image: debezium/connect:2.5.0.Final
+    container_name: debezium
+    ports:
+      - 8083:8083
+    depends_on:
+      - kafka
+    environment:
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: debezium-config
+      OFFSET_STORAGE_TOPIC: debezium-offset
+      STATUS_STORAGE_TOPIC: debezium-status
+      BOOTSTRAP_SERVERS: kafka:9092
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+  # 데이터 디렉터리가 노드 이름(rabbit@<hostname>)에 묶이므로 hostname 을 고정한다.
+  rabbitmq:
+    image: rabbitmq:3.12.4-management
+    container_name: rabbitmq
+    hostname: rabbitmq
+    ports:
+      - 5672:5672
+      - 15672:15672
+      - 25672:25672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+  minio:
+    # Docker Hub 의 minio/minio 배포 중단으로 quay.io 공식 레지스트리를 쓴다. 이전과 같은 릴리스(같은 이미지 digest)다.
+    image: quay.io/minio/minio:RELEASE.2024-02-14T21-36-02Z
+    command: server /data --console-address ":9001"
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?data/.env 에 MINIO_ROOT_PASSWORD 를 설정하세요}
+    shm_size: '1gb'
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    # 호스트 경로는 머신마다 달라서 data/.env 에 둔다.
+    volumes:
+      - ${MINIO_DATA_DIR:?data/.env 에 MINIO_DATA_DIR 를 설정하세요}:/data
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+networks:
+  modu-infra:
+    external: true
+  # Redis Cluster 노드 간 전용. 고정 IP 를 쓰기 위해 서브넷을 못박는다.
+  # 도커가 자동 배정하는 172.16.0.0/12, 192.168.0.0/16 과 겹치지 않도록 10.x 를 쓴다.
+  redis-cluster:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.90.0.0/24
+          # 노드 고정 IP(10.90.0.11~16)와 겹치지 않도록 동적 배정은 뒤쪽 절반에서만 한다.
+          ip_range: 10.90.0.128/25
+
+volumes:
+  mysql-member:
+  mysql-chat:
+  mysql-push:
+  mysql-profile:
+  mysql-commerce:
+  mongo-01:
+  mongo-02:
+  mongo-03:
+  redis-data:
+  redis-node-1:
+  redis-node-2:
+  redis-node-3:
+  redis-node-4:
+  redis-node-5:
+  redis-node-6:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:
+  rabbitmq-data:
