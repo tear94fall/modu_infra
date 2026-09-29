@@ -44,7 +44,8 @@ Redis 클러스터는 별도 init 컨테이너 없이 `redis-node-1` 이 직접 
 
 | 대상 | 호스트 포트 |
 |---|---|
-| mysql-member / chat / push / profile | 3306 / 3307 / 3308 / 3309 |
+| mysql-member / chat / push / profile (쓰기, 복제 소스) | 3306 / 3307 / 3308 / 3309 |
+| mysql-member-replica / chat / push / profile (읽기, 복제 레플리카) | 3326 / 3327 / 3328 / 3329 |
 | mysql-commerce (쓰기, 복제 소스) | 3316 |
 | mysql-commerce-replica (읽기, 복제 레플리카) | 3317 |
 | mongo-01 / 02 / 03 | 27017 / 27018 / 27019 |
@@ -65,10 +66,12 @@ Redis 클러스터는 별도 init 컨테이너 없이 `redis-node-1` 이 직접 
 - `data/kafka/*.sh`: 토픽 생성·조회·삭제. `copy-script.sh` 는 상대 경로로 스크립트 파일 이름을 참조하므로 반드시 `data/kafka` 디렉터리에서 실행해야 합니다 (kafka 컨테이너에 복사해서 사용).
 - `data/debezium/*.sh`: 커넥터 등록·조회·삭제 (`create_connector.sh` 는 `data/.env` 의 비밀번호 사용)
 - `data/mongodb/rs-init.sh`: replica set 최초 구성 (`docker exec mongo-01 bash /scripts/rs-init.sh`, 최초 1회만)
-- `data/mysql-commerce/replica-setup.sh`: 커머스 MySQL 읽기·쓰기 분리. `mysql-commerce`(소스, GTID·binlog ROW) → `mysql-commerce-replica`(레플리카) GTID 비동기 복제를 건다. `data/` 에서 `sh mysql-commerce/replica-setup.sh`.
-  - 복제 계정 `repl`(REPLICATION SLAVE) 과 앱 읽기 계정 `commerce_ro`(commerce.* SELECT) 를 소스에 만든다(읽기 계정은 복제로 레플리카에 전파). 비밀번호는 `data/.env` 의 `COMMERCE_REPL_PASSWORD`, `COMMERCE_RO_PASSWORD`.
-  - 레플리카가 복제 중이 아니면 소스의 commerce DB 를 GTID 위치와 함께 덤프해 적재한 뒤 `SOURCE_AUTO_POSITION=1` 로 복제를 시작하고 `read_only`·`super_read_only` 를 `SET PERSIST` 로 켠다. 이미 복제 중이면 계정만 맞추고 넘어간다(여러 번 실행해도 된다).
-  - 상태 확인: `docker exec -e MYSQL_PWD=... mysql-commerce-replica mysql -uroot -e "SHOW REPLICA STATUS\G"` (Replica_IO/SQL_Running, Seconds_Behind_Source)
+- `data/mysql/replica-setup.sh <대상>`: MySQL 읽기·쓰기 분리. 소스(GTID·binlog ROW) → 레플리카 GTID 비동기 복제를 건다. `data/` 에서 실행, 여러 번 돌려도 된다.
+  - 대상: `member` `chat` `push` `profile` `commerce`, 묶음 `messenger`(앞의 넷) `all`. (`mysql-commerce/replica-setup.sh` 는 `commerce` 를 부르는 껍데기)
+  - 복제 계정 `repl` 과 앱 읽기 계정(메신저 `modu_ro`, 커머스 `commerce_ro`, SELECT 만)을 소스에 만든다(복제로 레플리카에 전파). 비밀번호는 `data/.env` 의 `MESSENGER_REPL_PASSWORD`·`MESSENGER_RO_PASSWORD`, `COMMERCE_REPL_PASSWORD`·`COMMERCE_RO_PASSWORD`.
+  - 레플리카가 복제 중이 아니면 소스 DB 를 GTID 위치와 함께 덤프해 적재한 뒤 `SOURCE_AUTO_POSITION=1` 로 복제를 시작하고 `read_only`·`super_read_only` 를 `SET PERSIST` 로 켠다. 복제 중이면 계정만 맞춘다.
+  - mysql-member 에는 `modu-chat`(회원)·`modu-point`(포인트)·`modu-schedule`(스케줄) 스키마가 함께 있다. 복제를 건 뒤 소스에서 만든 스키마는 복제로 따라온다.
+  - 상태 확인: 레플리카에서 `SHOW REPLICA STATUS\G` (Replica_IO/SQL_Running, Seconds_Behind_Source)
   - `read_only` 를 레플리카 시작 옵션에 두면 이미지 첫 초기화가 root 비밀번호를 못 만든다 — 그래서 스크립트가 켠다.
 
 ## 주의사항
