@@ -45,7 +45,8 @@ Redis 클러스터는 별도 init 컨테이너 없이 `redis-node-1` 이 직접 
 | 대상 | 호스트 포트 |
 |---|---|
 | mysql-member / chat / push / profile | 3306 / 3307 / 3308 / 3309 |
-| mysql-commerce | 3316 |
+| mysql-commerce (쓰기, 복제 소스) | 3316 |
+| mysql-commerce-replica (읽기, 복제 레플리카) | 3317 |
 | mongo-01 / 02 / 03 | 27017 / 27018 / 27019 |
 | redis (단일) | 6379 |
 | redis-node-1~6 | 호스트 포트 없음 (modu-infra 네트워크에서 `redis-node-N:6379`) |
@@ -64,6 +65,11 @@ Redis 클러스터는 별도 init 컨테이너 없이 `redis-node-1` 이 직접 
 - `data/kafka/*.sh`: 토픽 생성·조회·삭제. `copy-script.sh` 는 상대 경로로 스크립트 파일 이름을 참조하므로 반드시 `data/kafka` 디렉터리에서 실행해야 합니다 (kafka 컨테이너에 복사해서 사용).
 - `data/debezium/*.sh`: 커넥터 등록·조회·삭제 (`create_connector.sh` 는 `data/.env` 의 비밀번호 사용)
 - `data/mongodb/rs-init.sh`: replica set 최초 구성 (`docker exec mongo-01 bash /scripts/rs-init.sh`, 최초 1회만)
+- `data/mysql-commerce/replica-setup.sh`: 커머스 MySQL 읽기·쓰기 분리. `mysql-commerce`(소스, GTID·binlog ROW) → `mysql-commerce-replica`(레플리카) GTID 비동기 복제를 건다. `data/` 에서 `sh mysql-commerce/replica-setup.sh`.
+  - 복제 계정 `repl`(REPLICATION SLAVE) 과 앱 읽기 계정 `commerce_ro`(commerce.* SELECT) 를 소스에 만든다(읽기 계정은 복제로 레플리카에 전파). 비밀번호는 `data/.env` 의 `COMMERCE_REPL_PASSWORD`, `COMMERCE_RO_PASSWORD`.
+  - 레플리카가 복제 중이 아니면 소스의 commerce DB 를 GTID 위치와 함께 덤프해 적재한 뒤 `SOURCE_AUTO_POSITION=1` 로 복제를 시작하고 `read_only`·`super_read_only` 를 `SET PERSIST` 로 켠다. 이미 복제 중이면 계정만 맞추고 넘어간다(여러 번 실행해도 된다).
+  - 상태 확인: `docker exec -e MYSQL_PWD=... mysql-commerce-replica mysql -uroot -e "SHOW REPLICA STATUS\G"` (Replica_IO/SQL_Running, Seconds_Behind_Source)
+  - `read_only` 를 레플리카 시작 옵션에 두면 이미지 첫 초기화가 root 비밀번호를 못 만든다 — 그래서 스크립트가 켠다.
 
 ## 주의사항
 
