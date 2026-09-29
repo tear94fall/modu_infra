@@ -25,6 +25,17 @@ x-mysql-messenger: &mysql-messenger
     - modu-infra
   restart: unless-stopped
 
+# 메신저 읽기 DB(레플리카) 공통. DB·계정은 복제로 받는다. 처음 한 번 mysql/replica-setup.sh 로 복제를 건다.
+x-mysql-messenger-replica: &mysql-messenger-replica
+  image: mysql:8.0.32
+  environment:
+    MYSQL_ROOT_HOST: '%'
+    MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?data/.env 에 MYSQL_ROOT_PASSWORD 를 설정하세요}
+  healthcheck: *mysql-healthcheck
+  networks:
+    - modu-infra
+  restart: unless-stopped
+
 x-mongo: &mongo
   image: mongo:7.0.8
   environment:
@@ -83,6 +94,7 @@ x-redis-node: &redis-node
   restart: unless-stopped
 
 services:
+  # 메신저 쓰기 DB(소스) 4개. 읽기는 각각의 -replica 가 GTID 복제로 받아 간다.
   mysql-member:
     <<: *mysql-messenger
     container_name: mysql-member
@@ -90,6 +102,35 @@ services:
       - 3306:3306
     volumes:
       - mysql-member:/var/lib/mysql
+    command:
+      - mysqld
+      - --server-id=11
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-expire-logs-seconds=604800
+
+  mysql-member-replica:
+    <<: *mysql-messenger-replica
+    container_name: mysql-member-replica
+    ports:
+      - 3326:3306
+    volumes:
+      - mysql-member-replica:/var/lib/mysql
+    command:
+      - mysqld
+      - --server-id=21
+      - --log-bin=mysql-bin
+      - --relay-log=relay-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --log-replica-updates=ON
+      - --binlog-expire-logs-seconds=604800
+    depends_on:
+      mysql-member:
+        condition: service_healthy
 
   mysql-chat:
     <<: *mysql-messenger
@@ -98,6 +139,35 @@ services:
       - 3307:3306
     volumes:
       - mysql-chat:/var/lib/mysql
+    command:
+      - mysqld
+      - --server-id=12
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-expire-logs-seconds=604800
+
+  mysql-chat-replica:
+    <<: *mysql-messenger-replica
+    container_name: mysql-chat-replica
+    ports:
+      - 3327:3306
+    volumes:
+      - mysql-chat-replica:/var/lib/mysql
+    command:
+      - mysqld
+      - --server-id=22
+      - --log-bin=mysql-bin
+      - --relay-log=relay-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --log-replica-updates=ON
+      - --binlog-expire-logs-seconds=604800
+    depends_on:
+      mysql-chat:
+        condition: service_healthy
 
   mysql-push:
     <<: *mysql-messenger
@@ -106,6 +176,35 @@ services:
       - 3308:3306
     volumes:
       - mysql-push:/var/lib/mysql
+    command:
+      - mysqld
+      - --server-id=13
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-expire-logs-seconds=604800
+
+  mysql-push-replica:
+    <<: *mysql-messenger-replica
+    container_name: mysql-push-replica
+    ports:
+      - 3328:3306
+    volumes:
+      - mysql-push-replica:/var/lib/mysql
+    command:
+      - mysqld
+      - --server-id=23
+      - --log-bin=mysql-bin
+      - --relay-log=relay-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --log-replica-updates=ON
+      - --binlog-expire-logs-seconds=604800
+    depends_on:
+      mysql-push:
+        condition: service_healthy
 
   mysql-profile:
     <<: *mysql-messenger
@@ -114,6 +213,35 @@ services:
       - 3309:3306
     volumes:
       - mysql-profile:/var/lib/mysql
+    command:
+      - mysqld
+      - --server-id=14
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-expire-logs-seconds=604800
+
+  mysql-profile-replica:
+    <<: *mysql-messenger-replica
+    container_name: mysql-profile-replica
+    ports:
+      - 3329:3306
+    volumes:
+      - mysql-profile-replica:/var/lib/mysql
+    command:
+      - mysqld
+      - --server-id=24
+      - --log-bin=mysql-bin
+      - --relay-log=relay-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --log-replica-updates=ON
+      - --binlog-expire-logs-seconds=604800
+    depends_on:
+      mysql-profile:
+        condition: service_healthy
 
   # 커머스 쓰기 DB(소스). 읽기는 mysql-commerce-replica 가 GTID 복제로 받아 간다.
   mysql-commerce:
@@ -429,9 +557,13 @@ networks:
 
 volumes:
   mysql-member:
+  mysql-member-replica:
   mysql-chat:
+  mysql-chat-replica:
   mysql-push:
+  mysql-push-replica:
   mysql-profile:
+  mysql-profile-replica:
   mysql-commerce:
   mysql-commerce-replica:
   mongo-01:
