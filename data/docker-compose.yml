@@ -115,6 +115,7 @@ services:
     volumes:
       - mysql-profile:/var/lib/mysql
 
+  # 커머스 쓰기 DB(소스). 읽기는 mysql-commerce-replica 가 GTID 복제로 받아 간다.
   mysql-commerce:
     image: mysql:8.0.44
     container_name: mysql-commerce
@@ -126,8 +127,49 @@ services:
       MYSQL_DATABASE: commerce
       MYSQL_ROOT_HOST: '%'
       MYSQL_ROOT_PASSWORD: ${COMMERCE_DB_PASSWORD:?data/.env 에 COMMERCE_DB_PASSWORD 를 설정하세요}
-    command: ["mysqld", "--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    command:
+      - mysqld
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --binlog-expire-logs-seconds=604800
     healthcheck: *mysql-healthcheck
+    networks:
+      - modu-infra
+    restart: unless-stopped
+
+  # 커머스 읽기 DB(레플리카). 처음 한 번 mysql-commerce/replica-setup.sh 로 복제를 걸고, 그 스크립트가 read_only·super_read_only 를
+  # SET PERSIST 로 켠다(root 쓰기도 막음). 시작 옵션에 두면 이미지 첫 초기화가 root 비밀번호를 못 만든다.
+  mysql-commerce-replica:
+    image: mysql:8.0.44
+    container_name: mysql-commerce-replica
+    ports:
+      - 3317:3306
+    volumes:
+      - mysql-commerce-replica:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_ROOT_PASSWORD: ${COMMERCE_DB_PASSWORD:?data/.env 에 COMMERCE_DB_PASSWORD 를 설정하세요}
+    command:
+      - mysqld
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --server-id=2
+      - --log-bin=mysql-bin
+      - --relay-log=relay-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --log-replica-updates=ON
+      - --binlog-expire-logs-seconds=604800
+    healthcheck: *mysql-healthcheck
+    depends_on:
+      mysql-commerce:
+        condition: service_healthy
     networks:
       - modu-infra
     restart: unless-stopped
@@ -391,6 +433,7 @@ volumes:
   mysql-push:
   mysql-profile:
   mysql-commerce:
+  mysql-commerce-replica:
   mongo-01:
   mongo-02:
   mongo-03:
