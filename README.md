@@ -28,6 +28,14 @@ cp data/.env.example data/.env          # 값 채우기 (MINIO_DATA_DIR 포함 �
 # monitoring/.env, monitoring/mysql/.my.cnf, data/mongodb/mongodb.key 도 필요합니다 (git 제외)
 ```
 
+## 스키마 관리
+
+MySQL 스키마는 애플리케이션이 아니라 DBA 가 gh-ost 로 바꿉니다(서비스는 `ddl-auto: validate`). 기준선·변경 이력·절차는 `data/mysql/` 에 있습니다.
+
+- `data/mysql/DBA.md` — 원칙(외래키 없음, 두 버전 공존), 변경 한 건의 흐름, 방법 선택 표
+- `data/mysql/schema/*.sql` — 스키마 기준선 7개, `schema/changes/` — 변경 이력, `schema/checks/` — 고아 행 점검
+- `data/mysql/ghost.sh` — gh-ost 실행, `ghost-user-setup.sh` — gh-ost 계정, `dump-schema.sh` — 기준선 갱신, `check-orphans.sh` — 점검
+
 ## 기동 순서
 
 1. `cd pinpoint-docker && docker compose up -d` — 계속 띄워 둘 필요는 없지만, modu_messenger 가 external 네트워크 `pinpoint-docker_pinpoint` 와 볼륨 `pinpoint-docker_data-volume` 을 참조하므로 messenger 를 처음 띄우기 전에 한 번은 `up` 을 해서 이 둘을 만들어 둬야 합니다. `docker network create pinpoint-docker_pinpoint` 로 네트워크만 만드는 것은 대체가 안 됩니다 — pinpoint-docker 는 이 네트워크에 고정 서브넷과 collector 고정 IP 를 기대하기 때문입니다. 그러니 한 번은 실제로 `up` 하는 것을 권장합니다. (HBase 준비에 수 분)

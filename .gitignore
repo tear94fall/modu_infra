@@ -10,3 +10,5 @@ monitoring/mysql/.my.cnf
 *.bak
 
 .DS_Store
+# gh-ost 실행 중 플래그·소켓 파일
+data/mysql/ghost-run/
