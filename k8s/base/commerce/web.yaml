@@ -33,6 +33,12 @@ spec:
         ports:
         - name: http
           containerPort: 80
+        # nginx 의 resolver 는 search 도메인을 안 써서 upstream 은 FQDN 이어야 한다(이미지 기본값은 짧은 이름 — compose 용).
+        env:
+        - name: GATEWAY_HOST
+          value: "gateway-service.modu.svc.cluster.local"
+        - name: STORAGE_HOST
+          value: "storage-service.modu.svc.cluster.local"
         # nginx.conf.template 의 upstream 은 gateway-service:8000(과 storage-service:9999)을 이름으로 resolve 한다 — Service 이름이 같다.
         # resolver 는 NGINX_ENTRYPOINT_LOCAL_RESOLVERS 로 파드의 /etc/resolv.conf(클러스터 DNS)에서 읽는다.
         readinessProbe:
