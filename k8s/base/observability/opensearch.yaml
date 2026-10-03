@@ -1,4 +1,4 @@
-# OpenSearch + Dashboards — compose(monitoring/docker-compose.yml)와 같은 이미지·설정. 파드 로그는 otel-collector.yaml 이 여기로 보낸다.
+# OpenSearch + Dashboards — compose 시절(monitoring/docker-compose.yml, 2026-10-04 삭제)과 같은 이미지·설정. 파드 로그는 otel-collector.yaml 이 여기로 보낸다.
 # OpenSearch 단일 노드(로그 저장소, 인덱스 modu-app-logs). dev 전용: 보안 플러그인 끔.
 # compose 의 ulimits memlock 은 옮기지 않았다(bootstrap.memory_lock 을 안 켜서 쓰이지 않는다). vm.max_map_count 는 노드(=Docker VM) 커널 값을
 # 그대로 쓴다 — compose 의 opensearch 가 같은 커널에서 돌았으므로 sysctl init 컨테이너(privileged)는 두지 않았다.

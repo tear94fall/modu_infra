@@ -1,4 +1,4 @@
-# gh-ost (GitHub online schema migration) 실행용. ghost.sh 가 이 이미지를 modu-infra 네트워크에서 띄운다.
+# gh-ost (GitHub online schema migration) 실행용. ghost.sh 가 이 이미지를 k8s 의 일회용 파드로 띄운다(build-and-import.sh 로 노드에 넣는다).
 # 릴리스 바이너리를 그대로 담는다 — https://github.com/github/gh-ost/releases
 FROM debian:bookworm-slim
 ARG GHOST_VERSION=1.1.11

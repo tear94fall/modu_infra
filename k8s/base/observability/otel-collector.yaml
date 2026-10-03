@@ -1,4 +1,4 @@
-# k8s 파드 로그 → OpenSearch(opensearch.yaml, 같은 네임스페이스). compose 의 monitoring/otel/otel-collector.yml 과 같은 흐름을
+# k8s 파드 로그 → OpenSearch(opensearch.yaml, 같은 네임스페이스). compose 시절 monitoring/otel/otel-collector.yml(2026-10-04 삭제)과 같은 흐름을
 # 노드마다 하나(DaemonSet)로: /var/log/pods 의 CRI 로그를 읽어(container 오퍼레이터가 형식 판별·k8s 메타데이터 추출) 앱 JSON 이면 필드를 풀고
 # modu-app-logs 로 보낸다. compose 와 같은 필드: attributes.container(컨테이너 이름), attributes.project=k8s.
 apiVersion: v1

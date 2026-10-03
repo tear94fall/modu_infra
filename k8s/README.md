@@ -20,13 +20,14 @@ k8s/
     loadbalancers.yaml               # Mac 에서 들어오는 입구: 앱 6개 + 인프라 UI 8개(compose 와 같은 호스트 포트)
     pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS)
     secret.example.yaml              # Secret config-service 의 틀(값 비어 있음) — kustomization 에 없음
-  create-infra-secret.sh             # compose 의 .env·키 파일 → Secret infra, mongo-keyfile, mysqld-exporter
-  infra-secrets.example.env          # Secret infra 의 키 목록(값 비어 있음)
+  create-infra-secret.sh             # infra.env + mongodb.key → Secret infra, mongo-keyfile, mysqld-exporter
+  infra-secrets.example.env          # Secret infra 의 키 목록(값 비어 있음) — infra.env 로 복사해 채운다
+  infra.env, mongodb.key             # (gitignored) Secret 의 원본 값·mongo keyFile
 ```
 
 ## dev 의 기본 실행 환경 (2026-10-03 부터)
 
-dev 는 **전부 k8s 에서 돈다.** 처음(2026-10-03 오전)엔 앱 계층만 옮기고 인프라는 compose 에 둔 채 headless Service + Endpoints(`gen-infra-endpoints.sh`, 지금은 없음)로 이었고, 같은 날 인프라도 옮겼다 — compose 스택(`data/`, `monitoring/`, `pinpoint-docker/`, 앱 4개)은 내려 둔다. 둘을 같이 띄울 메모리가 없다(Docker VM 24GB).
+dev 는 **전부 k8s 에서 돈다.** 처음(2026-10-03 오전)엔 앱 계층만 옮기고 인프라는 compose 에 둔 채 headless Service + Endpoints(`gen-infra-endpoints.sh`, 지금은 없음)로 이었고, 같은 날 인프라도 옮겼다. compose 스택(`data/docker-compose.yml`, `monitoring/`, `pinpoint-docker/`, 앱 4개)은 내린 뒤 2026-10-04 에 저장소에서도 지웠다(git 이력에만 있다). 둘을 같이 띄울 메모리가 없다(Docker VM 24GB).
 
 - **입구**: Docker Desktop 의 k8s 는 NodePort 를 localhost 로 내보내지 않지만 **LoadBalancer Service 는 Mac 의 모든 인터페이스(*:포트)로 연다.** compose 가 쓰던 포트 그대로라 앱·콘솔·웹 주소가 안 바뀐다 — 게이트웨이 8000(안드로이드는 `192.168.0.3:8000`), 콘솔 8081/8084/8085, 커머스 웹 8082, config-service 8888(dev 도구용).
 - **로그**: `otel-collector` DaemonSet 이 `/var/log/pods/modu_*` 를 읽어 compose 와 같은 OpenSearch 인덱스 `modu-app-logs` 로 보낸다(`attributes.project: k8s`, `attributes.container`).
@@ -39,7 +40,7 @@ dev 는 **전부 k8s 에서 돈다.** 처음(2026-10-03 오전)엔 앱 계층만
   for d in "${J[@]}"; do kubectl -n modu rollout resume deploy/$d; kubectl -n modu rollout status deploy/$d; done
   ```
   이미지 태그 하나만 바꾸는 평소 배포는 그 Deployment 하나만 굴러가므로 그냥 `apply -k` 하면 된다.
-- **compose 는 없다**: 2026-10-03 밤에 compose 컨테이너·볼륨·네트워크를 전부 지웠다. 되돌릴 일이 있으면 옮기기 직전 백업(`~/modu-data/backup/2026-10-03-k8s/`: MySQL 5개 전체 덤프, Mongo 아카이브, MinIO 파일, Grafana 데이터)으로 다시 올린다. 저장소의 `data/`·`monitoring/`·`pinpoint-docker/` 는 참고용으로만 남아 있다.
+- **compose 는 없다**: 2026-10-03 밤에 compose 컨테이너·볼륨·네트워크를 전부 지웠고, 2026-10-04 에 저장소의 compose 파일(`data/docker-compose.yml`, `monitoring/`, `pinpoint-docker/`, `data/mongodb/`)도 지웠다. 되돌릴 일이 있으면 옮기기 직전 백업(`~/modu-data/backup/2026-10-03-k8s/`: MySQL 5개 전체 덤프, Mongo 아카이브, MinIO 파일, Grafana 데이터)과 git 이력의 compose 파일로 다시 올린다. 저장소의 `data/` 에는 스키마(`data/mysql/schema`)와 k8s 기준 운영 스크립트만 남아 있다.
 
 ## 매니페스트 요약
 
@@ -66,7 +67,8 @@ set -a; source ~/workspace/modu_platform/.env; set +a
 kubectl -n modu create secret generic config-service \
   --from-literal=ENCRYPT_KEY="$ENCRYPT_KEY" --from-literal=INTERNAL_API_TOKEN="$INTERNAL_API_TOKEN"
 
-# 2) 인프라 Secret(infra, mongo-keyfile, mysqld-exporter) — compose 의 .env·키 파일에서. 다시 돌려도 된다(apply)
+# 2) 인프라 Secret(infra, mongo-keyfile, mysqld-exporter) — k8s/infra.env + k8s/mongodb.key(둘 다 gitignored)에서. 다시 돌려도 된다(apply)
+cp infra-secrets.example.env infra.env && $EDITOR infra.env      # 처음 한 번: 23개 값 채우기(키마다 주석). mongodb.key 가 없으면 openssl rand -base64 756 > mongodb.key
 ./create-infra-secret.sh
 
 # 3) MinIO 이미지를 노드에 넣는다(imagePullPolicy: Never — 레지스트리가 막혀 있다)
@@ -115,11 +117,11 @@ kubectl -n modu port-forward svc/mysql-member 3306:3306        # compose 때 호
 kubectl -n modu port-forward svc/mongo-01 27017:27017
 kubectl -n modu port-forward svc/redis 6379:6379
 ```
-Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커가 클러스터 안의 이름 `redis-node-N`·`kafka:9092` 를 광고한다) — `kubectl -n modu exec -it redis-node-1-0 -- redis-cli -c`, `kubectl -n modu exec -it kafka-0 -- kafka-topics --bootstrap-server kafka:9092 --list` 처럼 파드 안에서.
+Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커가 클러스터 안의 이름 `redis-node-N`·`kafka:9092` 를 광고한다) — `kubectl -n modu exec -it redis-node-1-0 -- redis-cli -c`, `kubectl -n modu exec -it kafka-0 -- kafka-topics --bootstrap-server kafka:9092 --list` 처럼 파드 안에서. 토픽·Debezium 커넥터·MySQL 복제·gh-ost 는 `data/kafka`, `data/debezium`, `data/mysql` 의 스크립트가 그렇게 돈다(루트 README "운영 스크립트").
 
 ## 인프라도 k8s
 
-2026-10-03 에 compose 의 인프라(`data/`, `monitoring/`, `pinpoint-docker/`)를 `base/data`, `base/observability` 로 옮겼다. 네임스페이스는 앱과 같은 `modu` 하나.
+2026-10-03 에 compose 의 인프라(`data/docker-compose.yml`, `monitoring/`, `pinpoint-docker/` — 2026-10-04 에 저장소에서 지움)를 `base/data`, `base/observability` 로 옮겼다. 네임스페이스는 앱과 같은 `modu` 하나.
 **Service 이름·포트 = compose 컨테이너 이름·포트** 라서 앱 설정은 하나도 안 바뀐다. 이름이 정확히 `mysql-member` 여야 해서 상태 있는 것은 인스턴스마다 replicas 1 짜리 StatefulSet 이고, Service 는 ClusterIP — 단, `mongo-01..03` 은 **헤드리스 + `publishNotReadyAddresses`**(mongod 가 기동 중에 복제셋 설정의 자기 이름을 파드 IP 로 풀어야 멤버로 인식한다. ClusterIP 면 "not a member" 로 서지 않는다). 볼륨은 `volumeClaimTemplates`(StorageClass `standard` = local-path, 노드 디스크; **reclaim Delete — PVC 를 지우면 데이터도 지워진다**).
 
 | 구성 요소 | 종류 | 이미지 | Service:포트 | PVC | 메모리 req / limit |
@@ -159,10 +161,10 @@ compose 와 다른 점(이유는 각 매니페스트 주석):
 - **rabbitmq** — 데이터가 노드 이름 `rabbit@rabbitmq` 에 묶여 있어(compose `hostname: rabbitmq`) `RABBITMQ_NODENAME=rabbit@rabbitmq` + `hostAliases`(rabbitmq → 127.0.0.1). StatefulSet 파드의 hostname 은 `rabbitmq-0` 으로 강제된다.
 - **minio** — `shm_size: 1gb` 는 옮기지 않았다. 데이터는 bind mount(`MINIO_DATA_DIR`) 대신 PVC.
 - **opensearch** — `ulimits memlock` 은 뺐다(memory_lock 을 안 켬). `vm.max_map_count` 는 노드 = Docker VM 커널 값 그대로(compose 의 opensearch 가 같은 커널에서 돌았다), sysctl init 컨테이너 없음.
-- **prometheus** — 잡·대상 이름은 `monitoring/prometheus/prometheus.yml` 그대로(대상이 이제 k8s Service). `node` 잡은 뺐고 `cadvisor` 잡은 kubelet cAdvisor(API 서버 프록시 `/api/v1/nodes/<node>/proxy/metrics/cadvisor`, ClusterRole `modu-prometheus`)로 바꿨다. 설정 바꾼 뒤 `kubectl -n modu exec prometheus-0 -- wget -qO- --post-data= http://localhost:9090/-/reload`.
-- **grafana** — provisioning 을 projected 볼륨으로 compose 와 같은 디렉터리 모양으로. 대시보드 JSON 은 `base/observability/grafana/dashboards/`(monitoring 사본 — **고치면 두 곳 다**) → configMapGenerator 2개(client-side apply 의 last-applied 주석 256KiB 한도 때문에 나눔). `node-exporter.json`(468KB, 데이터도 없음)은 뺐다.
+- **prometheus** — 잡·대상 이름은 compose 의 `prometheus.yml` 그대로(ConfigMap `prometheus` 에 인라인. 대상이 이제 k8s Service). `node` 잡은 뺐고 `cadvisor` 잡은 kubelet cAdvisor(API 서버 프록시 `/api/v1/nodes/<node>/proxy/metrics/cadvisor`, ClusterRole `modu-prometheus`)로 바꿨다. 설정 바꾼 뒤 `kubectl -n modu exec prometheus-0 -- wget -qO- --post-data= http://localhost:9090/-/reload`.
+- **grafana** — provisioning 을 projected 볼륨으로 compose 와 같은 디렉터리 모양으로. 대시보드 JSON 은 `base/observability/grafana/dashboards/`(이제 유일한 사본) → configMapGenerator 2개(client-side apply 의 last-applied 주석 256KiB 한도 때문에 나눔). `node-exporter.json`(468KB, 데이터도 없음)은 뺐다(git 이력에만 있다).
 - **pinpoint** — batch·flink·quickstart·agent 는 compose 에서도 꺼져 있어 뺐다. ZooKeeper 는 `zoo1` 한 대(compose 는 zoo1..3) — HBase 의 `hbase-site.xml` 을 ConfigMap 으로 덮어 quorum 을 `zoo1` 로. **pinpoint-hbase 는 StatefulSet 이 아니라 Deployment + PVC**: HBase 는 자기 hostname 을 ZooKeeper 에 등록하는데 StatefulSet 은 hostname 을 `pinpoint-hbase-0`(아무도 못 푸는 이름)으로 강제한다 — Deployment 의 `hostname: pinpoint-hbase` = Service 이름. pinpoint-mysql 은 데이터 디렉터리가 비었을 때만 GitHub 에서 스키마를 받는다(compose 는 매 기동). 컬렉터 UDP 9995/9996 은 Service `pinpoint-collector-udp` 로 나눴다(같은 포트 번호 TCP+UDP 한 Service 는 client-side apply 가 패치를 못 만든다). 이미지 태그 `latest` 는 compose(.env `PINPOINT_VERSION=latest`) 그대로, `imagePullPolicy: IfNotPresent`.
-- **Secret** — 비밀은 전부 `secretKeyRef`(Secret `infra`, 키 = .env 변수 이름, pinpoint 것만 `PINPOINT_` 접두사), 매니페스트에 값 없음. `./create-infra-secret.sh` 가 `data/.env`·`monitoring/.env`·`pinpoint-docker/.env` 를 읽어(source 하지 않고 KEY=VALUE 줄만) `infra`, `data/mongodb/mongodb.key` → `mongo-keyfile`, `monitoring/mysql/.my.cnf` → `mysqld-exporter` 를 만든다. 키 목록은 `infra-secrets.example.env`.
+- **Secret** — 비밀은 전부 `secretKeyRef`(Secret `infra`, 키 = compose 시절 .env 변수 이름, pinpoint 것만 `PINPOINT_` 접두사), 매니페스트에 값 없음. 원본은 한 파일 **`k8s/infra.env`**(gitignored, 23개 키 — 틀과 키마다 뜻은 `infra-secrets.example.env`)와 **`k8s/mongodb.key`**(gitignored). `./create-infra-secret.sh` 가 `infra.env` 를 읽어(source 하지 않고 KEY=VALUE 줄만) `infra` 를, `mongodb.key` 로 `mongo-keyfile` 을, `infra.env` 의 `MYSQL_ROOT_PASSWORD`·`COMMERCE_DB_PASSWORD` 로 `.my.cnf`(`[client]`·`[client.commerce]`, root)를 만들어 `mysqld-exporter` 를 만든다. 매니페스트·운영 스크립트가 쓰는 키가 빠지면 실패한다. 값은 화면에 안 찍는다. 운영 스크립트(`data/mysql/*.sh` 등)도 같은 Secret 을 `kubectl get secret infra -o jsonpath` 로 읽는다.
 
 ### 처음 옮길 때 순서
 
@@ -184,8 +186,10 @@ kubectl apply -k overlays/dev
 kubectl -n modu get pods -l app.kubernetes.io/component=data -w
 kubectl -n modu logs job/redis-cluster-init        # "creating cluster" … 또는 "already formed"
 kubectl -n modu exec redis-node-1-0 -- redis-cli cluster info | head -3
-# 4) 빈 데이터로 시작했다면: mongo replica set, MySQL 복제(replica-setup.sh 는 아직 docker exec 기준 — 아래 '후속')
+# 4) 빈 데이터로 시작했다면: mongo replica set, MySQL 복제, gh-ost 계정
 kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh
+sh ../data/mysql/replica-setup.sh all            # 소스 → 레플리카 GTID 복제 + repl·읽기 계정
+sh ../data/mysql/ghost-user-setup.sh             # gh-ost 계정 ghost
 ```
 
 다시 만들기: `redis-cluster-init` 은 끝난 Job 이 그대로 남는다(pod 템플릿 불변). 클러스터를 새로 만들려면 `kubectl -n modu delete job redis-cluster-init` 뒤 `apply -k`.
@@ -258,7 +262,7 @@ kubectl delete -k overlays/dev                              # 전부 내리기 �
 
 ## k8s 에 없는 것 (후속)
 
-- **인프라 운영 스크립트** — `data/mysql/*.sh`(replica-setup, ghost, dump-schema, check-orphans), `data/mysql-commerce/replica-setup.sh`, `data/kafka/*.sh`, `data/debezium/*.sh` 는 아직 `docker exec`/`docker run` 기준이다. k8s 에서는 `kubectl -n modu exec <이름>-0 -- …` 로 바꿔 써야 한다(gh-ost 는 레플리카 Service 에 붙이면 된다).
+- **gh-ost 이미지** — `modu-gh-ost:1.1.11` 은 레지스트리에 없어 `data/mysql/gh-ost/build-and-import.sh` 로 노드의 containerd 에 넣는다(MinIO 이미지와 같은 방식). 노드를 다시 만들면 다시. 실제 클러스터에선 GHCR 에 올리고 `imagePullPolicy` 를 바꾼다.
 - **node-exporter·cadvisor** — 도커 호스트 지표라 옮기지 않았다. 컨테이너 지표는 Prometheus 가 kubelet cAdvisor 로 긁는다(라벨이 달라 Grafana `cadvisor` 대시보드는 `pod`/`container` 라벨로 고쳐야 한다). `node-exporter.json` 대시보드는 뺐다.
 - **앱 파드의 service link env** — 인프라 Service 가 ClusterIP 가 되면서 앱 파드에도 `MYSQL_MEMBER_PORT=tcp://…`, `KAFKA_PORT` 같은 env 가 수십 개 들어간다. 겹치는 이름은 지금 없지만 앱 Deployment 에도 `enableServiceLinks: false` 를 주는 것이 안전하다.
 - **Pinpoint 요청 추적** — 에이전트 13개가 컬렉터에 등록되고 앱 목록에 보이지만, 요청 처리 로그 줄에 `PtxId`/`PspanId` 가 아직 안 붙는다(기동 줄에는 붙음). 트랜잭션 샘플링/서블릿 플러그인 설정 확인 필요.
