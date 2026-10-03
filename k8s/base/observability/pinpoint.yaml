@@ -1,7 +1,7 @@
-# Pinpoint APM 서버 — compose(pinpoint-docker/docker-compose.yml + override, .env 의 PINPOINT_VERSION=latest)에서 실제로 쓰던 것만:
+# Pinpoint APM 서버 — compose 시절(pinpoint-docker/docker-compose.yml + override, .env 의 PINPOINT_VERSION=latest — 2026-10-04 삭제)에서 실제로 쓰던 것만:
 # hbase, mysql, redis(→ pinpoint-redis), zookeeper(zoo1 한 대), collector, web. batch·flink·quickstart·agent 는 compose 에서도 꺼져 있어 뺐다.
 # 이미지 태그 latest 는 compose 그대로 — imagePullPolicy IfNotPresent 로 노드에 있는 것을 쓴다(Always 면 매번 레지스트리로 간다).
-# 비밀번호는 Secret infra 의 PINPOINT_* 키(pinpoint-docker/.env 의 같은 이름에 PINPOINT_ 접두사 — data/.env 의 MYSQL_ROOT_PASSWORD 와 이름이 겹쳐서).
+# 비밀번호는 Secret infra 의 PINPOINT_* 키(k8s/infra.env. compose 시절 pinpoint-docker/.env 의 같은 이름에 PINPOINT_ 접두사 — data/.env 의 MYSQL_ROOT_PASSWORD 와 이름이 겹쳐서).
 # zoo1: Pinpoint 전용 ZooKeeper 한 대(compose 는 zoo1..3 앙상블). ZOO_SERVERS 를 안 줘서 단독(standalone) 모드. compose 도 이름 있는 볼륨이 없어 emptyDir.
 # collector·web 의 PINPOINT_ZOOKEEPER_ADDRESS=zoo1, HBase 의 hbase.zookeeper.quorum=zoo1(아래 hbase-site.xml).
 apiVersion: apps/v1

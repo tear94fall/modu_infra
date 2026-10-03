@@ -1,7 +1,7 @@
 # MongoDB 3노드 replica set(mongo:7.0.8) — compose 의 mongo-01..03 과 같은 이름·포트(27017).
-# keyFile 은 Secret mongo-keyfile(data/mongodb/mongodb.key, create-infra-secret.sh). mongod 는 키 파일이 0400 이고 소유자가 자기(999)여야 해서
+# keyFile 은 Secret mongo-keyfile(k8s/mongodb.key, create-infra-secret.sh). mongod 는 키 파일이 0400 이고 소유자가 자기(999)여야 해서
 # Secret 을 바로 쓰지 않고 init 컨테이너가 emptyDir 로 복사해 chown 999:999 · chmod 400 한다.
-# replica set 최초 구성 스크립트(data/mongodb/rs-init.sh 사본). mongo-01 의 /scripts 에 마운트 — 최초 1회만: kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh
+# replica set 최초 구성 스크립트(compose 시절 data/mongodb/rs-init.sh — 이제 여기가 유일한 사본). mongo-01 의 /scripts 에 마운트 — 최초 1회만: kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh
 apiVersion: v1
 kind: ConfigMap
 metadata:

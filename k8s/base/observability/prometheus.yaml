@@ -54,7 +54,7 @@ subjects:
   name: prometheus
   namespace: modu
 ---
-# monitoring/prometheus/prometheus.yml 과 같은 잡·대상 이름(이제 k8s Service 로 풀린다; member-service 관리 포트 8082 는 member-service Service 에 있다).
+# compose 시절 monitoring/prometheus/prometheus.yml 과 같은 잡·대상 이름(이제 k8s Service 로 풀린다; member-service 관리 포트 8082 는 member-service Service 에 있다).
 # 빠진 것: node(node-exporter — 도커 호스트 지표, k8s 에는 안 옮겼다). cadvisor 는 kubelet 으로 바꿨다.
 # 바꾼 뒤: kubectl apply -k 하고 kubectl -n modu exec prometheus-0 -- wget -qO- --post-data= http://localhost:9090/-/reload (ConfigMap 반영까지 ~1분)
 apiVersion: v1

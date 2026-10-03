@@ -1,4 +1,4 @@
-# ZooKeeper + Kafka + Debezium + Kafka UI — compose(data/docker-compose.yml)와 같은 이미지·이름·포트.
+# ZooKeeper + Kafka + Debezium + Kafka UI — compose 시절(data/docker-compose.yml, 2026-10-04 삭제)과 같은 이미지·이름·포트.
 # ZooKeeper(Kafka 용). data·log 두 볼륨은 compose 와 같은 경로.
 apiVersion: apps/v1
 kind: StatefulSet

@@ -1,4 +1,4 @@
-# MySQL 10개 — compose(data/docker-compose.yml)의 컨테이너 이름 = Service 이름(:3306). 이름이 정확히 mysql-member 여야 해서 인스턴스마다 replicas 1 StatefulSet.
+# MySQL 10개 — compose 시절(data/docker-compose.yml, 2026-10-04 삭제)의 컨테이너 이름 = Service 이름(:3306). 이름이 정확히 mysql-member 여야 해서 인스턴스마다 replicas 1 StatefulSet.
 # 메신저 4쌍(mysql:8.0.32, root=MYSQL_ROOT_PASSWORD, 앱 계정 user=MYSQL_USER_PASSWORD) + 커머스 1쌍(mysql:8.0.44, root=COMMERCE_DB_PASSWORD).
 # compose 의 depends_on(레플리카는 소스가 healthy 뒤에)은 k8s 에 없다 — 레플리카는 그냥 같이 뜨고, 복제는 replica-setup.sh 가 건다.
 # 비밀번호는 Secret infra(k8s/create-infra-secret.sh). 볼륨에 데이터가 있으면 MYSQL_* 초기화는 다시 일어나지 않는다.
@@ -118,7 +118,7 @@ spec:
     port: 3306
     targetPort: mysql
 ---
-# mysql-member-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — 지금은 docker exec 기준, README).
+# mysql-member-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — kubectl exec 기준, 루트 README "운영 스크립트").
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -343,7 +343,7 @@ spec:
     port: 3306
     targetPort: mysql
 ---
-# mysql-chat-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — 지금은 docker exec 기준, README).
+# mysql-chat-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — kubectl exec 기준, 루트 README "운영 스크립트").
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -568,7 +568,7 @@ spec:
     port: 3306
     targetPort: mysql
 ---
-# mysql-push-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — 지금은 docker exec 기준, README).
+# mysql-push-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — kubectl exec 기준, 루트 README "운영 스크립트").
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -793,7 +793,7 @@ spec:
     port: 3306
     targetPort: mysql
 ---
-# mysql-profile-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — 지금은 docker exec 기준, README).
+# mysql-profile-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — kubectl exec 기준, 루트 README "운영 스크립트").
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -1013,7 +1013,7 @@ spec:
     port: 3306
     targetPort: mysql
 ---
-# mysql-commerce-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql-commerce/replica-setup.sh — 지금은 docker exec 기준, README).
+# mysql-commerce-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql-commerce/replica-setup.sh — kubectl exec 기준, 루트 README "운영 스크립트").
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
