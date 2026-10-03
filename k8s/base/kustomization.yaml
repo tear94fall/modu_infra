@@ -1,0 +1,34 @@
+# modu 앱 계층(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3)의 공통 매니페스트. 상태 있는 인프라(MySQL·Redis·Kafka·Mongo·MinIO·RabbitMQ …)는
+# 여기 없다 — docker compose(modu_infra data/)에 그대로 두고, overlays/dev 가 그 컨테이너 IP 를 headless Service + Endpoints 로 이어 준다.
+# 이미지 태그는 base 가 develop, 오버레이가 images: 로 고정한다. 환경별 값(NodePort, 복제 수, config-repo ConfigMap, 인프라 Endpoints)은 오버레이에.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: modu
+
+# 모든 객체·파드 템플릿에 붙는 공통 라벨. selector 에는 넣지 않는다(selector 는 불변이라 나중에 라벨을 바꿀 수 없게 된다).
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: modu
+    includeSelectors: false
+    includeTemplates: true
+
+resources:
+  - namespace.yaml
+  - platform/config-service.yaml
+  - platform/gateway-service.yaml
+  - messenger/auth-service.yaml
+  - messenger/member-service.yaml
+  - messenger/chat-service.yaml
+  - messenger/chat-store-service.yaml
+  - messenger/ws-service.yaml
+  - messenger/push-service.yaml
+  - messenger/storage-service.yaml
+  - messenger/profile-service.yaml
+  - messenger/point-service.yaml
+  - messenger/schedule-service.yaml
+  - commerce/commerce-service.yaml
+  - commerce/web.yaml
+  - admin/modu-admin.yaml
+  - admin/modu-system.yaml
+  - admin/modu-internal.yaml

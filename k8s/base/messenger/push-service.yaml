@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: push-service
+  labels:
+    app: push-service
+    app.kubernetes.io/name: push-service
+    app.kubernetes.io/component: messenger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: push-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: push-service
+        app.kubernetes.io/name: push-service
+        app.kubernetes.io/component: messenger
+    spec:
+      # server.shutdown=graceful(timeout-per-shutdown-phase 20s)이 처리 중인 요청을 끝낼 시간(compose stop_grace_period 30s).
+      terminationGracePeriodSeconds: 30
+      # 이미지가 아직 root 로 돈다(후속 과제: Dockerfile 에 USER 추가 후 true 로).
+      securityContext:
+        runAsNonRoot: false
+      containers:
+      - name: push-service
+        image: ghcr.io/tear94fall/modu-chat/push-service:develop
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 9990
+        env:
+        - name: CONFIG_SERVER_URI
+          value: "http://config-service:8888"
+        - name: SPRING_DATASOURCE_MASTER_URL
+          value: "jdbc:mysql://mysql-push:3306/modu-chat"
+        - name: SPRING_DATASOURCE_MASTER_USERNAME
+          value: "root"
+        - name: SPRING_DATASOURCE_REPLICA_URL
+          value: "jdbc:mysql://mysql-push-replica:3306/modu-chat"
+        - name: SPRING_DATASOURCE_REPLICA_USERNAME
+          value: "modu_ro"
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Dprofiler.logback.logging.transactioninfo=true"
+        # 기동이 끝날 때까지(최대 30×5s=150s) liveness 가 죽이지 않도록 startupProbe 가 먼저 readiness 를 본다.
+        startupProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 9990
+          periodSeconds: 5
+          failureThreshold: 30
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 9990
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 6
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 9990
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 3
+          timeoutSeconds: 3
+        # compose 의 mem_reservation/mem_limit 과 같은 값. JVM 은 -XX:MaxRAMPercentage=75 로 limit 안에서 힙을 잡는다. CPU limit 은 두지 않는다.
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: push-service
+  labels:
+    app: push-service
+    app.kubernetes.io/name: push-service
+    app.kubernetes.io/component: messenger
+spec:
+  type: ClusterIP
+  selector:
+    app: push-service
+  ports:
+  - name: http
+    port: 9990
+    targetPort: http
