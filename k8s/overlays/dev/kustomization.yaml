@@ -1,0 +1,90 @@
+# dev 오버레이: 로컬 Docker Desktop Kubernetes(context docker-desktop, 1 노드). 네임스페이스는 base 와 같은 modu.
+# 앱 계층만 k8s 에 띄우고, 상태 있는 인프라는 같은 Mac 의 docker compose 에 둔 채 infra-endpoints.yaml 로 잇는다.
+#   ./gen-infra-endpoints.sh        → infra-endpoints.yaml        (컨테이너 IP 가 바뀌면 다시)
+#   ./gen-config-repo-configmaps.sh → config-repo-configmaps.yaml (modu_platform/config-repo 를 고치면 다시)
+# Secret config-service 는 여기 없다(secret.example.yaml 참고, README).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: modu
+
+resources:
+  - ../../base
+  - infra-endpoints.yaml
+  - config-repo-configmaps.yaml
+  - nodeports.yaml
+
+# 이미지 태그. base 는 develop(브랜치 롤링 태그). CI 가 올린 태그(예: sha-…)로 바꿔 apply 하면 그 Deployment 만 롤아웃된다.
+images:
+  - name: ghcr.io/tear94fall/modu-platform/config-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-platform/gateway-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/auth-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/member-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/chat-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/chat-store-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/ws-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/push-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/storage-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/profile-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/point-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-chat/schedule-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-commerce/commerce-service
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-commerce/web
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-admin/modu-admin
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-admin/modu-system
+    newTag: develop
+  - name: ghcr.io/tear94fall/modu-admin/modu-internal
+    newTag: develop
+
+# 복제 수. 1 노드라 gateway·config 만 2(롤링 재배포 때 끊기지 않게), 나머지는 1.
+# 메모리 requests 합(JVM 14개×512Mi + nginx 4개×16Mi ≈ 7.1GiB)이 노드 allocatable 을 넘으면 Pending 이 된다 — Docker Desktop 메모리를 확인(README).
+replicas:
+  - name: config-service
+    count: 2
+  - name: gateway-service
+    count: 2
+  - name: auth-service
+    count: 1
+  - name: member-service
+    count: 1
+  - name: chat-service
+    count: 1
+  - name: chat-store-service
+    count: 1
+  - name: ws-service
+    count: 1
+  - name: push-service
+    count: 1
+  - name: storage-service
+    count: 1
+  - name: profile-service
+    count: 1
+  - name: point-service
+    count: 1
+  - name: schedule-service
+    count: 1
+  - name: commerce-service
+    count: 1
+  - name: modu-commerce-web
+    count: 1
+  - name: modu-admin
+    count: 1
+  - name: modu-system
+    count: 1
+  - name: modu-internal
+    count: 1

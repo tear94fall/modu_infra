@@ -1,0 +1,88 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: commerce-service
+  labels:
+    app: commerce-service
+    app.kubernetes.io/name: commerce-service
+    app.kubernetes.io/component: commerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: commerce-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: commerce-service
+        app.kubernetes.io/name: commerce-service
+        app.kubernetes.io/component: commerce
+    spec:
+      # server.shutdown=graceful(timeout-per-shutdown-phase 20s)이 처리 중인 요청을 끝낼 시간(compose stop_grace_period 30s).
+      terminationGracePeriodSeconds: 30
+      # 이미지가 아직 root 로 돈다(후속 과제: Dockerfile 에 USER 추가 후 true 로).
+      securityContext:
+        runAsNonRoot: false
+      containers:
+      - name: commerce-service
+        image: ghcr.io/tear94fall/modu-commerce/commerce-service:develop
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8200
+        env:
+        - name: CONFIG_SERVER_URI
+          value: "http://config-service:8888"
+        # 기동이 끝날 때까지(최대 30×5s=150s) liveness 가 죽이지 않도록 startupProbe 가 먼저 readiness 를 본다.
+        startupProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8200
+          periodSeconds: 5
+          failureThreshold: 30
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8200
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 6
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8200
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 3
+          timeoutSeconds: 3
+        # compose 의 mem_reservation/mem_limit 과 같은 값. JVM 은 -XX:MaxRAMPercentage=75 로 limit 안에서 힙을 잡는다. CPU limit 은 두지 않는다.
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1280Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: commerce-service
+  labels:
+    app: commerce-service
+    app.kubernetes.io/name: commerce-service
+    app.kubernetes.io/component: commerce
+spec:
+  type: ClusterIP
+  selector:
+    app: commerce-service
+  ports:
+  - name: http
+    port: 8200
+    targetPort: http

@@ -375,6 +375,9 @@ services:
     <<: *redis-node
     container_name: redis-node-1
     logging: *logging
+    # 6379 를 localhost 에만 공개 — k8s 파드가 10.90.0.11:6379 로 붙으려면 공개된 포트여야 한다(kafka 주석 참고)
+    ports:
+      - "127.0.0.1:17001:6379"
     hostname: redis-node-1
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.11
@@ -399,6 +402,9 @@ services:
     <<: *redis-node
     container_name: redis-node-2
     logging: *logging
+    # 6379 를 localhost 에만 공개 — k8s 파드가 10.90.0.12:6379 로 붙으려면 공개된 포트여야 한다(kafka 주석 참고)
+    ports:
+      - "127.0.0.1:17002:6379"
     hostname: redis-node-2
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.12
@@ -413,6 +419,9 @@ services:
     <<: *redis-node
     container_name: redis-node-3
     logging: *logging
+    # 6379 를 localhost 에만 공개 — k8s 파드가 10.90.0.13:6379 로 붙으려면 공개된 포트여야 한다(kafka 주석 참고)
+    ports:
+      - "127.0.0.1:17003:6379"
     hostname: redis-node-3
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.13
@@ -427,6 +436,9 @@ services:
     <<: *redis-node
     container_name: redis-node-4
     logging: *logging
+    # 6379 를 localhost 에만 공개 — k8s 파드가 10.90.0.14:6379 로 붙으려면 공개된 포트여야 한다(kafka 주석 참고)
+    ports:
+      - "127.0.0.1:17004:6379"
     hostname: redis-node-4
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.14
@@ -441,6 +453,9 @@ services:
     <<: *redis-node
     container_name: redis-node-5
     logging: *logging
+    # 6379 를 localhost 에만 공개 — k8s 파드가 10.90.0.15:6379 로 붙으려면 공개된 포트여야 한다(kafka 주석 참고)
+    ports:
+      - "127.0.0.1:17005:6379"
     hostname: redis-node-5
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.15
@@ -455,6 +470,9 @@ services:
     <<: *redis-node
     container_name: redis-node-6
     logging: *logging
+    # 6379 를 localhost 에만 공개 — k8s 파드가 10.90.0.16:6379 로 붙으려면 공개된 포트여야 한다(kafka 주석 참고)
+    ports:
+      - "127.0.0.1:17006:6379"
     hostname: redis-node-6
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.16
@@ -488,6 +506,9 @@ services:
     logging: *logging
     ports:
       - "29092:29092"
+      # 9092 를 localhost(호스트 19092 — 테스트의 임베디드 Kafka 가 9092 를 쓴다)에만 공개한다. 도커는 공개된 포트에만 다른 네트워크(Docker Desktop 의 k8s 파드 등)에서 들어오는 연결을 허용해서,
+      # 이게 있어야 k8s 안의 서비스가 kafka:9092 로 직접 붙는다. 호스트에서 쓰라고 연 포트가 아니다.
+      - "127.0.0.1:19092:9092"
     depends_on:
       - zookeeper
     environment:

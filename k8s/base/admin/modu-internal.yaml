@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modu-internal
+  labels:
+    app: modu-internal
+    app.kubernetes.io/name: modu-internal
+    app.kubernetes.io/component: admin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: modu-internal
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: modu-internal
+        app.kubernetes.io/name: modu-internal
+        app.kubernetes.io/component: admin
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: false
+      containers:
+      - name: modu-internal
+        image: ghcr.io/tear94fall/modu-admin/modu-internal:develop
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 80
+        # nginx.conf.template 의 upstream 은 gateway-service:8000(과 storage-service:9999)을 이름으로 resolve 한다 — Service 이름이 같다.
+        # resolver 는 NGINX_ENTRYPOINT_LOCAL_RESOLVERS 로 파드의 /etc/resolv.conf(클러스터 DNS)에서 읽는다.
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 3
+          periodSeconds: 10
+          failureThreshold: 3
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          failureThreshold: 3
+          timeoutSeconds: 3
+        resources:
+          requests:
+            memory: 16Mi
+            cpu: 50m
+          limits:
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: modu-internal
+  labels:
+    app: modu-internal
+    app.kubernetes.io/name: modu-internal
+    app.kubernetes.io/component: admin
+spec:
+  type: ClusterIP
+  selector:
+    app: modu-internal
+  ports:
+  - name: http
+    port: 80
+    targetPort: http

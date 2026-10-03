@@ -1,0 +1,125 @@
+# config-service: 모든 서비스의 기동 게이트. Secret `config-service`(ENCRYPT_KEY, INTERNAL_API_TOKEN)는 kustomize 에 없다 —
+# overlays/dev/secret.example.yaml 을 보고 kubectl 로 한 번 만든다(README). Secret 이 없으면 파드가 CreateContainerConfigError 로 기다린다.
+# readiness 는 /config-repo 를 읽을 수 있을 때만 UP(configServer indicator).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: config-service
+  labels:
+    app: config-service
+    app.kubernetes.io/name: config-service
+    app.kubernetes.io/component: platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: config-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: config-service
+        app.kubernetes.io/name: config-service
+        app.kubernetes.io/component: platform
+    spec:
+      # server.shutdown=graceful(timeout-per-shutdown-phase 20s)이 처리 중인 요청을 끝낼 시간(compose stop_grace_period 30s).
+      terminationGracePeriodSeconds: 30
+      # 이미지가 아직 root 로 돈다(후속 과제: Dockerfile 에 USER 추가 후 true 로).
+      securityContext:
+        runAsNonRoot: false
+      containers:
+      - name: config-service
+        image: ghcr.io/tear94fall/modu-platform/config-service:develop
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8888
+        env:
+        - name: ENCRYPT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: config-service
+              key: ENCRYPT_KEY
+        - name: INTERNAL_API_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: config-service
+              key: INTERNAL_API_TOKEN
+        - name: RABBITMQ_HOST
+          value: "rabbitmq"
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Dprofiler.logback.logging.transactioninfo=true"
+        volumeMounts:
+        # modu_platform/config-repo 를 ConfigMap 셋으로 마운트(키에 / 를 못 쓰므로 디렉터리마다 하나).
+        # config-service 의 search-locations: file:/config-repo, /config-repo/messenger, /config-repo/commerce
+        - name: config-repo-root
+          mountPath: /config-repo
+          readOnly: true
+        - name: config-repo-messenger
+          mountPath: /config-repo/messenger
+          readOnly: true
+        - name: config-repo-commerce
+          mountPath: /config-repo/commerce
+          readOnly: true
+        # 기동이 끝날 때까지(최대 30×5s=150s) liveness 가 죽이지 않도록 startupProbe 가 먼저 readiness 를 본다.
+        startupProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8888
+          periodSeconds: 5
+          failureThreshold: 30
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8888
+          initialDelaySeconds: 20
+          periodSeconds: 10
+          failureThreshold: 6
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8888
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 3
+          timeoutSeconds: 3
+        # compose 의 mem_reservation/mem_limit 과 같은 값. JVM 은 -XX:MaxRAMPercentage=75 로 limit 안에서 힙을 잡는다. CPU limit 은 두지 않는다.
+        resources:
+          requests:
+            memory: 512Mi
+            cpu: 250m
+          limits:
+            memory: 1Gi
+      volumes:
+      - name: config-repo-root
+        configMap:
+          name: config-repo-root
+      - name: config-repo-messenger
+        configMap:
+          name: config-repo-messenger
+      - name: config-repo-commerce
+        configMap:
+          name: config-repo-commerce
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: config-service
+  labels:
+    app: config-service
+    app.kubernetes.io/name: config-service
+    app.kubernetes.io/component: platform
+spec:
+  type: ClusterIP
+  selector:
+    app: config-service
+  ports:
+  - name: http
+    port: 8888
+    targetPort: http
