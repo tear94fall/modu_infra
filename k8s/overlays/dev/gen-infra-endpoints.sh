@@ -35,6 +35,7 @@ mongo-03                mongo-03                modu-infra                27017
 minio                   minio                   modu-infra                9000
 rabbitmq                rabbitmq                modu-infra                5672
 pinpoint-collector      pinpoint-collector      pinpoint-docker_pinpoint  9991,9992,9993
+opensearch              opensearch              modu-infra                9200
 '
 
 command -v docker >/dev/null || { echo "docker 가 PATH 에 없다" >&2; exit 1; }

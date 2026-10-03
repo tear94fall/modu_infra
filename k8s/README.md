@@ -15,9 +15,28 @@ k8s/
     kustomization.yaml               # images(태그), replicas, 아래 생성 파일들
     gen-infra-endpoints.sh           # docker inspect → infra-endpoints.yaml (headless Service + Endpoints)
     gen-config-repo-configmaps.sh    # modu_platform/config-repo → config-repo-configmaps.yaml (ConfigMap 3개)
-    nodeports.yaml                   # Mac 에서 들어오는 NodePort 5개
+    loadbalancers.yaml               # Mac 에서 들어오는 입구: LoadBalancer 6개(compose 와 같은 호스트 포트)
+    otel-collector.yaml              # 파드 로그 → OpenSearch modu-app-logs (DaemonSet)
+    pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS)
     secret.example.yaml              # Secret config-service 의 틀(값 비어 있음) — kustomization 에 없음
 ```
+
+## dev 의 기본 실행 환경 (2026-10-03 부터)
+
+dev 의 앱 계층은 **k8s 에서 돈다.** compose 의 앱 스택(modu_platform, modu_messenger, modu_commerce, modu_admin)은 내려 두고, 인프라(`data/`, `monitoring/`, `pinpoint-docker/`)만 compose 로 띄운다. 둘을 같이 띄울 메모리가 없다(Docker VM 24GB).
+
+- **입구**: Docker Desktop 의 k8s 는 NodePort 를 localhost 로 내보내지 않지만 **LoadBalancer Service 는 Mac 의 모든 인터페이스(*:포트)로 연다.** compose 가 쓰던 포트 그대로라 앱·콘솔·웹 주소가 안 바뀐다 — 게이트웨이 8000(안드로이드는 `192.168.0.3:8000`), 콘솔 8081/8084/8085, 커머스 웹 8082, config-service 8888(dev 도구용).
+- **로그**: `otel-collector` DaemonSet 이 `/var/log/pods/modu_*` 를 읽어 compose 와 같은 OpenSearch 인덱스 `modu-app-logs` 로 보낸다(`attributes.project: k8s`, `attributes.container`).
+- **Pinpoint**: JVM 13개에 에이전트(컬렉터와 같은 3.1.0). 에이전트 3.1 은 `-D` 로 설정을 덮어쓸 때 `pinpoint.` 접두사가 필요하다.
+- **롤아웃은 한 번에 하나씩.** 단일 노드·빠듯한 메모리에서 13개 Deployment 의 pod 템플릿을 한꺼번에 바꾸면(공통 패치 수정 + `apply -k`) maxSurge 1 때문에 JVM 이 26개가 되어 노드가 멈춘다(2026-10-03 실제로 API 서버가 응답 불능). 공통 변경은:
+  ```bash
+  J=(config-service gateway-service auth-service member-service chat-service chat-store-service ws-service push-service profile-service storage-service point-service schedule-service commerce-service)
+  kubectl -n modu rollout pause deploy "${J[@]}"      # zsh 는 $J 를 단어로 안 나눈다 — 배열로
+  kubectl apply -k overlays/dev
+  for d in "${J[@]}"; do kubectl -n modu rollout resume deploy/$d; kubectl -n modu rollout status deploy/$d; done
+  ```
+  이미지 태그 하나만 바꾸는 평소 배포는 그 Deployment 하나만 굴러가므로 그냥 `apply -k` 하면 된다.
+- **compose 로 되돌리기**: `kubectl -n modu scale deploy --all --replicas=0` 뒤 각 앱 스택에서 `docker compose up -d`.
 
 ## 매니페스트 요약
 
@@ -63,18 +82,16 @@ kubectl -n modu get pods -o wide
 
 ## 포트 — Mac 에서 들어오는 길
 
-Docker Desktop 은 NodePort 를 `localhost` 로 매핑한다(안드로이드 기기에서는 Mac 의 LAN IP). compose 호스트 포트 + 30000.
+`overlays/dev/loadbalancers.yaml` 의 LoadBalancer Service 가 Mac 의 모든 인터페이스에 compose 와 **같은 포트**로 열린다(Docker Desktop 은 NodePort 는 localhost 로 안 내보낸다). 안드로이드 기기는 Mac 의 LAN IP(`192.168.0.3`).
 
-| URL | 대상 | compose 때 |
-|---|---|---|
-| http://localhost:30080 | gateway-service 8000 (앱 API, `/auth-service/**`, `/member-service/**` …) | :8000 |
-| http://localhost:30082 | modu-commerce-web (nginx → gateway, storage) | :8082 |
-| http://localhost:30081 | modu-admin 콘솔 | :8081 |
-| http://localhost:30084 | modu-system 콘솔(gateway config·API 문서) | :8084 |
-| http://localhost:30085 | modu-internal 콘솔 | :8085 |
+| URL | 대상 |
+|---|---|
+| http://localhost:8000 | gateway-service (앱 API, `/auth-service/**`, `/member-service/**` …) |
+| http://localhost:8082 | modu-commerce-web (nginx → gateway) |
+| http://localhost:8081 / 8084 / 8085 | modu-admin / modu-system / modu-internal 콘솔 |
+| http://localhost:8888 | config-service (dev 도구용 — 토큰 발급 스크립트 등) |
 
 개별 서비스 포트(9900, 8080 …)는 바깥에 열지 않는다. 필요하면 `kubectl -n modu port-forward svc/member-service 8080:8080`.
-안드로이드 앱의 base URL 을 `:30080` 으로 바꿔야 k8s 쪽을 본다(compose 의 `:8000` 과 병행 가능 — 둘이 같은 인프라를 공유한다).
 
 ## 인프라 연결 (infra-endpoints.yaml)
 

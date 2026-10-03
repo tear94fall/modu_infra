@@ -1,0 +1,39 @@
+# pinpoint-agent-patch.yaml 과 같은 내용 — 이미 volumes·volumeMounts 가 있는 Deployment(storage, config)에 덧붙이는 판.
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: pinpoint-agent
+    emptyDir: {}
+- op: add
+  path: /spec/template/spec/initContainers
+  value:
+    - name: pinpoint-agent
+      image: pinpointdocker/pinpoint-agent:3.1.0
+      command: ["sh", "-c", "cp -r /pinpoint-agent/. /agent/"]
+      volumeMounts:
+        - name: pinpoint-agent
+          mountPath: /agent
+      resources:
+        requests: {memory: 32Mi, cpu: 50m}
+        limits: {memory: 64Mi}
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: pinpoint-agent
+    mountPath: /pinpoint-agent
+    readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: PINPOINT_APP
+    valueFrom: {fieldRef: {fieldPath: "metadata.labels['app']"}}
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: POD_IP
+    valueFrom: {fieldRef: {fieldPath: status.podIP}}
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: JDK_JAVA_OPTIONS
+    value: "-javaagent:/pinpoint-agent/pinpoint-bootstrap.jar -Dpinpoint.profiler.profiles.active=release -Dpinpoint.collector.ip=pinpoint-collector -Dpinpoint.applicationName=$(PINPOINT_APP) -Dpinpoint.agentId=$(POD_IP) -Dpinpoint.profiler.logback.logging.transactioninfo=true"

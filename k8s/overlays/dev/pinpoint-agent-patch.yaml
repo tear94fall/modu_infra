@@ -1,0 +1,44 @@
+# Pinpoint 에이전트를 JVM 서비스(이름이 *-service 인 Deployment)에 붙인다. compose 는 pinpoint-agent 볼륨을 마운트했지만
+# k8s 에선 init 컨테이너가 에이전트 이미지(컬렉터(3.1.0)와 같은 버전)에서 jar 를 emptyDir 로 복사한다.
+# JAVA_TOOL_OPTIONS 는 base 가 이미 쓰고 있어서(로그 MDC 옵션) java 런처가 읽는 JDK_JAVA_OPTIONS 로 따로 준다.
+# 에이전트 3.1 은 -D 로 설정을 덮어쓸 때 pinpoint. 접두사가 필요하다(로그 MDC 의 PtxId·PspanId).
+# applicationName 은 파드 라벨 app, agentId 는 파드 IP(24자 제한 안, 파드마다 다름). 컬렉터는 infra-endpoints 의 pinpoint-collector.
+# 볼륨이 없던 Deployment 용(배열을 새로 만든다). storage·config 는 pinpoint-agent-patch-append.yaml.
+- op: add
+  path: /spec/template/spec/volumes
+  value:
+    - name: pinpoint-agent
+      emptyDir: {}
+- op: add
+  path: /spec/template/spec/initContainers
+  value:
+    - name: pinpoint-agent
+      image: pinpointdocker/pinpoint-agent:3.1.0
+      command: ["sh", "-c", "cp -r /pinpoint-agent/. /agent/"]
+      volumeMounts:
+        - name: pinpoint-agent
+          mountPath: /agent
+      resources:
+        requests: {memory: 32Mi, cpu: 50m}
+        limits: {memory: 64Mi}
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts
+  value:
+    - name: pinpoint-agent
+      mountPath: /pinpoint-agent
+      readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: PINPOINT_APP
+    valueFrom: {fieldRef: {fieldPath: "metadata.labels['app']"}}
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: POD_IP
+    valueFrom: {fieldRef: {fieldPath: status.podIP}}
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: JDK_JAVA_OPTIONS
+    value: "-javaagent:/pinpoint-agent/pinpoint-bootstrap.jar -Dpinpoint.profiler.profiles.active=release -Dpinpoint.collector.ip=pinpoint-collector -Dpinpoint.applicationName=$(PINPOINT_APP) -Dpinpoint.agentId=$(POD_IP) -Dpinpoint.profiler.logback.logging.transactioninfo=true"
