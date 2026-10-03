@@ -23,6 +23,7 @@ scrape_configs:
           - config-service:8888
           - point-service:9600
           - schedule-service:8110
+          - commerce-service:8200
 
   - job_name: mysql
     metrics_path: /probe

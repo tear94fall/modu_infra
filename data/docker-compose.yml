@@ -93,11 +93,20 @@ x-redis-node: &redis-node
     - "mode=cluster"
   restart: unless-stopped
 
+# 모든 컨테이너 로그 줄에 compose 서비스·프로젝트 이름을 붙인다(json-file attrs). OTel Collector 가 container 필드와 앱/인프라 인덱스 구분에 쓴다.
+x-logging: &logging
+  driver: json-file
+  options:
+    labels: com.docker.compose.service,com.docker.compose.project
+    max-size: "50m"
+    max-file: "3"
+
 services:
   # 메신저 쓰기 DB(소스) 4개. 읽기는 각각의 -replica 가 GTID 복제로 받아 간다.
   mysql-member:
     <<: *mysql-messenger
     container_name: mysql-member
+    logging: *logging
     ports:
       - 3306:3306
     volumes:
@@ -114,6 +123,7 @@ services:
   mysql-member-replica:
     <<: *mysql-messenger-replica
     container_name: mysql-member-replica
+    logging: *logging
     ports:
       - 3326:3306
     volumes:
@@ -135,6 +145,7 @@ services:
   mysql-chat:
     <<: *mysql-messenger
     container_name: mysql-chat
+    logging: *logging
     ports:
       - 3307:3306
     volumes:
@@ -151,6 +162,7 @@ services:
   mysql-chat-replica:
     <<: *mysql-messenger-replica
     container_name: mysql-chat-replica
+    logging: *logging
     ports:
       - 3327:3306
     volumes:
@@ -172,6 +184,7 @@ services:
   mysql-push:
     <<: *mysql-messenger
     container_name: mysql-push
+    logging: *logging
     ports:
       - 3308:3306
     volumes:
@@ -188,6 +201,7 @@ services:
   mysql-push-replica:
     <<: *mysql-messenger-replica
     container_name: mysql-push-replica
+    logging: *logging
     ports:
       - 3328:3306
     volumes:
@@ -209,6 +223,7 @@ services:
   mysql-profile:
     <<: *mysql-messenger
     container_name: mysql-profile
+    logging: *logging
     ports:
       - 3309:3306
     volumes:
@@ -225,6 +240,7 @@ services:
   mysql-profile-replica:
     <<: *mysql-messenger-replica
     container_name: mysql-profile-replica
+    logging: *logging
     ports:
       - 3329:3306
     volumes:
@@ -247,6 +263,7 @@ services:
   mysql-commerce:
     image: mysql:8.0.44
     container_name: mysql-commerce
+    logging: *logging
     ports:
       - 3316:3306
     volumes:
@@ -275,6 +292,7 @@ services:
   mysql-commerce-replica:
     image: mysql:8.0.44
     container_name: mysql-commerce-replica
+    logging: *logging
     ports:
       - 3317:3306
     volumes:
@@ -305,6 +323,7 @@ services:
   mongo-01:
     <<: *mongo
     container_name: mongo-01
+    logging: *logging
     ports:
       - 27017:27017
     volumes:
@@ -315,6 +334,7 @@ services:
   mongo-02:
     <<: *mongo
     container_name: mongo-02
+    logging: *logging
     ports:
       - 27018:27017
     volumes:
@@ -324,6 +344,7 @@ services:
   mongo-03:
     <<: *mongo
     container_name: mongo-03
+    logging: *logging
     ports:
       - 27019:27017
     volumes:
@@ -336,6 +357,7 @@ services:
     image: redis:7.2.4-alpine
     command: redis-server --port 6379
     container_name: redis
+    logging: *logging
     hostname: redis
     labels:
       - "name=redis"
@@ -352,6 +374,7 @@ services:
   redis-node-1:
     <<: *redis-node
     container_name: redis-node-1
+    logging: *logging
     hostname: redis-node-1
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.11
@@ -375,6 +398,7 @@ services:
   redis-node-2:
     <<: *redis-node
     container_name: redis-node-2
+    logging: *logging
     hostname: redis-node-2
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.12
@@ -388,6 +412,7 @@ services:
   redis-node-3:
     <<: *redis-node
     container_name: redis-node-3
+    logging: *logging
     hostname: redis-node-3
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.13
@@ -401,6 +426,7 @@ services:
   redis-node-4:
     <<: *redis-node
     container_name: redis-node-4
+    logging: *logging
     hostname: redis-node-4
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.14
@@ -414,6 +440,7 @@ services:
   redis-node-5:
     <<: *redis-node
     container_name: redis-node-5
+    logging: *logging
     hostname: redis-node-5
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.15
@@ -427,6 +454,7 @@ services:
   redis-node-6:
     <<: *redis-node
     container_name: redis-node-6
+    logging: *logging
     hostname: redis-node-6
     environment:
       - REDIS_ANNOUNCE_IP=10.90.0.16
@@ -440,6 +468,7 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
     container_name: zookeeper
+    logging: *logging
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -456,6 +485,7 @@ services:
     image: confluentinc/cp-kafka:7.6.1
     hostname: kafka-broker-1
     container_name: kafka
+    logging: *logging
     ports:
       - "29092:29092"
     depends_on:
@@ -476,6 +506,7 @@ services:
 
   kafka-ui:
     container_name: kafka-ui
+    logging: *logging
     image: provectuslabs/kafka-ui:v0.7.2
     ports:
       - 9009:8080
@@ -494,6 +525,7 @@ services:
   debezium:
     image: debezium/connect:2.5.0.Final
     container_name: debezium
+    logging: *logging
     ports:
       - 8083:8083
     depends_on:
@@ -512,6 +544,7 @@ services:
   rabbitmq:
     image: rabbitmq:3.12.4-management
     container_name: rabbitmq
+    logging: *logging
     hostname: rabbitmq
     ports:
       - 5672:5672
@@ -528,6 +561,7 @@ services:
     image: quay.io/minio/minio:RELEASE.2024-02-14T21-36-02Z
     command: server /data --console-address ":9001"
     container_name: minio
+    logging: *logging
     environment:
       MINIO_ROOT_USER: minio
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?data/.env 에 MINIO_ROOT_PASSWORD 를 설정하세요}

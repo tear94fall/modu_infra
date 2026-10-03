@@ -13,7 +13,7 @@ modu 프로젝트(modu_messenger, modu_commerce)가 같이 쓰는 인프라와 �
 | 디렉터리 | compose 프로젝트 | 내용 |
 |---|---|---|
 | `data/` | `modu-data` | MySQL 5, MongoDB replica set 3, Redis 단일 + 클러스터 6, ZooKeeper, Kafka, kafka-ui, Debezium, RabbitMQ, MinIO |
-| `monitoring/` | `monitoring` | Prometheus, Grafana, node/cadvisor/mysqld/redis/mongodb/kafka exporter |
+| `monitoring/` | `monitoring` | Prometheus, Grafana, node/cadvisor/mysqld/redis/mongodb/kafka exporter, **로그: OpenSearch + Dashboards(5601) + OTel Collector** |
 | `pinpoint-docker/` | `pinpoint-docker` | Pinpoint APM. [pinpoint-apm/pinpoint-docker](https://github.com/pinpoint-apm/pinpoint-docker) 기반에 로컬 수정 포함: 네트워크 서브넷·collector IP, 웹 포트 18080, `docker-compose.override.yml`(pinpoint-mysql 13306, redis 16379 — data 스택 포트와 충돌 회피) |
 
 data·monitoring 컨테이너와 modu_messenger·modu_commerce 서비스는 external 네트워크 `modu-infra` 에 붙고, 서비스는 컨테이너 이름(`mysql-chat`, `kafka`, `redis` …)으로 인프라에 접근합니다.
@@ -27,6 +27,21 @@ docker network create modu-infra
 cp data/.env.example data/.env          # 값 채우기 (MINIO_DATA_DIR 포함 — minio 데이터를 bind mount 할 호스트 경로)
 # monitoring/.env, monitoring/mysql/.my.cnf, data/mongodb/mongodb.key 도 필요합니다 (git 제외)
 ```
+
+## 로그
+
+서비스는 로그를 **stdout 에 한 줄 JSON**(logstash-logback-encoder)으로만 씁니다. `monitoring/` 의 OTel Collector 가 도커 컨테이너 로그 파일(`/var/lib/docker/containers/*/*-json.log`)을 읽어 두 인덱스로 나눕니다. k8s 에선 같은 Collector 설정(`monitoring/otel/otel-collector.yml`)을 DaemonSet 로 옮기고 경로만 `/var/log/pods` 로 바꾸면 됩니다.
+
+| 인덱스 | 무엇 | 기준 |
+|---|---|---|
+| `modu-app-logs` | 앱 스택 컨테이너 전부 — 서비스·게이트웨이·config·커머스 웹·콘솔 nginx. JSON 줄은 필드를 풀고(`attributes.service`, `requestId` …), JVM 경고 같은 비 JSON 줄은 `body` 그대로 | compose 프로젝트가 `modu-messenger`·`modu-platform`·`modu-commerce`·`modu_admin` |
+| `modu-infra-logs` | MySQL·Kafka·Mongo·Redis·MinIO·exporter·OpenSearch 자신 등 | 그 밖의 프로젝트(`modu-data`, `monitoring` …) |
+
+모든 compose 파일(여기 둘 + 앱 저장소 넷)에 `x-logging` 앵커가 있어, 줄마다 `attributes.container`(compose 서비스 이름)와 `attributes.project` 가 붙고 로그 파일은 50MB×3 으로 돌아갑니다. 라벨은 컨테이너를 **다시 만들 때** 붙으므로 compose 를 바꾼 뒤 `docker compose up -d` 가 필요합니다.
+
+- 대시보드: http://localhost:5601 (Discover → 인덱스 패턴 `modu-app-logs*`(기본) / `modu-infra-logs*`). dev 라 보안 플러그인은 꺼 두었고 9200 은 localhost 에만 열려 있습니다.
+- 모든 앱 로그 줄에 MDC 가 붙습니다: `requestId`(게이트웨이가 `X-Request-Id` 로 발급·전파), `userId`, `service`, Pinpoint `PtxId`/`PspanId`. 한 요청을 따라가려면 `attributes.requestId:<id>` 로 검색합니다. `PtxId` 로는 Pinpoint 의 호출 트리와 맞춰 볼 수 있습니다.
+- 접근 로그: 모든 서비스가 `event:http.access`(method, path, status, durationMs) 한 줄. 커머스는 `event:api.access` 로 요청·응답 헤더·본문(민감 헤더 마스킹, 4KB 까지)까지 남깁니다.
 
 ## 스키마 관리
 
