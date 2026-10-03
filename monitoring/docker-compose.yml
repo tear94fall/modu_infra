@@ -1,9 +1,18 @@
 # modu 프로젝트 관측성 스택. 수집 대상은 modu-infra 네트워크의 컨테이너 이름으로 찾는다.
 # 프로젝트 이름(디렉터리 이름) monitoring 을 유지해야 기존 볼륨 monitoring_* 를 그대로 쓴다.
+# 모든 컨테이너 로그 줄에 compose 서비스·프로젝트 이름을 붙인다(json-file attrs). OTel Collector 가 container 필드와 앱/인프라 인덱스 구분에 쓴다.
+x-logging: &logging
+  driver: json-file
+  options:
+    labels: com.docker.compose.service,com.docker.compose.project
+    max-size: "50m"
+    max-file: "3"
+
 services:
   prometheus:
     image: prom/prometheus:v3.14.0
     container_name: prometheus
+    logging: *logging
     ports:
       - 19090:9090
     volumes:
@@ -20,6 +29,7 @@ services:
   grafana:
     image: grafana/grafana:13.2.0
     container_name: grafana
+    logging: *logging
     ports:
       - 3000:3000
     volumes:
@@ -37,6 +47,7 @@ services:
   node-exporter:
     image: prom/node-exporter:v1.12.1
     container_name: node-exporter
+    logging: *logging
     command:
       - --path.rootfs=/host
     volumes:
@@ -48,6 +59,7 @@ services:
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.55.1
     container_name: cadvisor
+    logging: *logging
     privileged: true
     volumes:
       - /:/rootfs:ro
@@ -62,6 +74,7 @@ services:
   mysqld-exporter:
     image: prom/mysqld-exporter:v0.20.0
     container_name: mysqld-exporter
+    logging: *logging
     command:
       - --config.my-cnf=/cfg/.my.cnf
     volumes:
@@ -73,6 +86,7 @@ services:
   redis-exporter:
     image: oliver006/redis_exporter:v1.90.0
     container_name: redis-exporter
+    logging: *logging
     environment:
       - REDIS_ADDR=redis://redis:6379
     networks:
@@ -82,6 +96,7 @@ services:
   mongodb-exporter:
     image: percona/mongodb_exporter:0.40
     container_name: mongodb-exporter
+    logging: *logging
     command:
       - --mongodb.uri=${MONGODB_URI}
       - --collect-all
@@ -92,6 +107,7 @@ services:
   kafka-exporter:
     image: danielqsj/kafka-exporter:v1.9.0
     container_name: kafka-exporter
+    logging: *logging
     command:
       - --kafka.server=kafka:9092
     networks:
@@ -102,6 +118,7 @@ services:
   opensearch:
     image: opensearchproject/opensearch:3.3.2
     container_name: opensearch
+    logging: *logging
     environment:
       - discovery.type=single-node
       - cluster.name=modu-logs
@@ -128,6 +145,7 @@ services:
   opensearch-dashboards:
     image: opensearchproject/opensearch-dashboards:3.3.0
     container_name: opensearch-dashboards
+    logging: *logging
     environment:
       - OPENSEARCH_HOSTS=["http://opensearch:9200"]
       - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
@@ -143,6 +161,7 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.141.0
     container_name: otel-collector
+    logging: *logging
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     # 도커의 컨테이너 로그 디렉터리는 root 0700 이라 root 로 읽는다(k8s DaemonSet 도 보통 root).
     user: "0:0"
