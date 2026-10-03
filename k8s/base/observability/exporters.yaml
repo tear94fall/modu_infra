@@ -1,6 +1,6 @@
 # Prometheus exporter 4개 — compose 와 같은 이미지·이름·포트(prometheus.yml 의 대상 이름 그대로).
 # node-exporter·cadvisor 는 옮기지 않았다(도커 호스트 지표). 컨테이너 지표는 prometheus.yaml 의 kubelet cAdvisor 잡.
-# mysqld-exporter: multi-target(/probe?target=mysql-member:3306&auth_module=client). 자격증명은 monitoring/mysql/.my.cnf
+# mysqld-exporter: multi-target(/probe?target=mysql-member:3306&auth_module=client). 자격증명은 Secret mysqld-exporter 의 .my.cnf(create-infra-secret.sh 가 infra.env 의 root 비밀번호로 만든다)
 # ([client] 메신저 root, [client.commerce] 커머스 root) → Secret mysqld-exporter(create-infra-secret.sh).
 apiVersion: apps/v1
 kind: Deployment

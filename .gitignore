@@ -1,17 +1,12 @@
-# 시크릿
+# 시크릿 — Secret infra·mongo-keyfile·mysqld-exporter 의 원본(k8s/create-infra-secret.sh 가 읽는다). 틀은 k8s/infra-secrets.example.env
+k8s/infra.env
+k8s/mongodb.key
 **/.env
-# pinpoint-docker 의 .env 는 원본 저장소 공개 기본값이라 포함한다
-!pinpoint-docker/.env
-!pinpoint-docker/**/.env
-data/mongodb/mongodb.key
-monitoring/mysql/.my.cnf
 
 # 로컬 백업 파일
 *.bak
 
 .DS_Store
-# gh-ost 실행 중 플래그·소켓 파일
-data/mysql/ghost-run/
 
 # k8s dev 오버레이의 생성 파일(config-repo 복사본) — 적용 전에 gen-config-repo-configmaps.sh 로 만든다
 k8s/overlays/dev/config-repo-configmaps.yaml
