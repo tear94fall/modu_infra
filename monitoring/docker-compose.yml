@@ -98,6 +98,66 @@ services:
       - modu-infra
     restart: always
 
+  # ---- 로그: 컨테이너 stdout(JSON) → OTel Collector → OpenSearch. 대시보드 http://localhost:5601 ----
+  opensearch:
+    image: opensearchproject/opensearch:3.3.2
+    container_name: opensearch
+    environment:
+      - discovery.type=single-node
+      - cluster.name=modu-logs
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+      # dev 전용: 보안 플러그인 끔(내부 네트워크, 포트는 localhost 에만). 운영에선 켜고 Collector·Dashboards 에 계정을 준다.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+    ports:
+      - 127.0.0.1:9200:9200
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=3s' >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - modu-infra
+    restart: always
+
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:3.3.0
+    container_name: opensearch-dashboards
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports:
+      - 5601:5601
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - modu-infra
+    restart: always
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.141.0
+    container_name: otel-collector
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    # 도커의 컨테이너 로그 디렉터리는 root 0700 이라 root 로 읽는다(k8s DaemonSet 도 보통 root).
+    user: "0:0"
+    volumes:
+      - ./otel/otel-collector.yml:/etc/otelcol-contrib/config.yaml:ro
+      # 도커 엔진의 컨테이너 로그 파일(json-file 드라이버). 읽기 전용.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - otel-checkpoints:/var/lib/otelcol
+    depends_on:
+      opensearch:
+        condition: service_healthy
+    networks:
+      - modu-infra
+    restart: always
+
 networks:
   modu-infra:
     external: true
@@ -105,3 +165,5 @@ networks:
 volumes:
   prometheus-data:
   grafana-data:
+  opensearch-data:
+  otel-checkpoints:

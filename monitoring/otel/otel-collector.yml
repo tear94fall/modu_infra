@@ -1,0 +1,72 @@
+# OTel Collector: 도커 컨테이너 로그(json-file) → OpenSearch. k8s 에선 같은 구성을 DaemonSet 로 옮기고 include 만 /var/log/pods 로 바꾼다.
+receivers:
+  filelog:
+    include: [/var/lib/docker/containers/*/*-json.log]
+    start_at: end
+    include_file_path: false
+    operators:
+      # 1) 도커 json-file 한 줄: {"log":"...","stream":"stdout","time":"..."}
+      - id: docker
+        type: json_parser
+        parse_to: attributes
+        timestamp:
+          parse_from: attributes.time
+          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+      - id: unwrap
+        type: move
+        from: attributes.log
+        to: body
+      - id: drop_time
+        type: remove
+        field: attributes.time
+      # 2) 앱 로그(LogstashEncoder 한 줄 JSON)면 필드를 풀고, 아니면 그대로 둔다
+      - id: route
+        type: router
+        routes:
+          - output: app
+            expr: 'body matches "^\\{\"@timestamp\".*\\}\\s*$"'
+        default: done
+      - id: app
+        type: json_parser
+        parse_from: body
+        parse_to: attributes
+        timestamp:
+          parse_from: attributes["@timestamp"]
+          layout_type: gotime
+          layout: '2006-01-02T15:04:05.000Z07:00'
+        severity:
+          parse_from: attributes.level
+      - id: app_message
+        type: move
+        from: attributes.message
+        to: body
+      - id: app_ts
+        type: remove
+        field: attributes["@timestamp"]
+      - id: done
+        type: noop
+
+processors:
+  batch:
+    timeout: 2s
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: dev
+        action: upsert
+
+exporters:
+  opensearch:
+    http:
+      endpoint: http://opensearch:9200
+    logs_index: modu-logs
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [resource, batch]
+      exporters: [opensearch]
