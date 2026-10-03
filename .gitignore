@@ -13,6 +13,5 @@ monitoring/mysql/.my.cnf
 # gh-ost 실행 중 플래그·소켓 파일
 data/mysql/ghost-run/
 
-# k8s dev 오버레이의 생성 파일(컨테이너 IP·config-repo 복사본) — 적용 전에 gen-*.sh 로 만든다
-k8s/overlays/dev/infra-endpoints.yaml
+# k8s dev 오버레이의 생성 파일(config-repo 복사본) — 적용 전에 gen-config-repo-configmaps.sh 로 만든다
 k8s/overlays/dev/config-repo-configmaps.yaml

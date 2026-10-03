@@ -1,0 +1,26 @@
+# 관측성 — compose(modu_infra/monitoring, pinpoint-docker)를 옮긴 것 + 파드 로그 수집(otel-collector DaemonSet).
+# node-exporter·cadvisor(도커 호스트 지표)는 옮기지 않았다 — 컨테이너 지표는 Prometheus 가 kubelet cAdvisor 로 긁는다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - opensearch.yaml
+  - otel-collector.yaml
+  - prometheus.yaml
+  - grafana.yaml
+  - exporters.yaml
+  - pinpoint.yaml
+
+# Grafana 대시보드 JSON(monitoring/grafana/provisioning/dashboards/json 사본). 바꾸면 이름 해시가 바뀌어 grafana 가 다시 뜬다.
+# client-side apply 는 객체 전체를 last-applied 주석(256KiB 한도)에 넣으므로 ConfigMap 을 나눈다(jvm-micrometer 81KB 를 따로).
+# node-exporter.json(468KB)은 한 개만으로도 한도를 넘고, node-exporter 를 옮기지 않아 데이터도 없으므로 뺐다.
+configMapGenerator:
+  - name: grafana-dashboards
+    files:
+      - grafana/dashboards/cadvisor.json
+      - grafana/dashboards/kafka-exporter.json
+      - grafana/dashboards/modu-infra.json
+      - grafana/dashboards/modu-overview.json
+      - grafana/dashboards/modu-service.json
+  - name: grafana-dashboards-jvm
+    files:
+      - grafana/dashboards/jvm-micrometer.json

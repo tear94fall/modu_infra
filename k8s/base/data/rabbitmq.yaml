@@ -1,0 +1,103 @@
+# RabbitMQ(Spring Cloud Bus, config-service RABBITMQ_HOST=rabbitmq). 15692 는 Prometheus 가 긁는 rabbitmq_prometheus 포트.
+# 데이터 디렉터리가 노드 이름(rabbit@<hostname>)에 묶인다 — compose 는 hostname: rabbitmq 로 고정했다. StatefulSet 파드의 hostname 은
+# rabbitmq-0 으로 강제되므로 RABBITMQ_NODENAME=rabbit@rabbitmq 로 이름을 고정하고, 그 이름이 파드 자신(127.0.0.1)으로 풀리도록 hostAliases 를 준다.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  labels:
+    app: rabbitmq
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/component: data
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+        app.kubernetes.io/name: rabbitmq
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      hostAliases:
+      - ip: 127.0.0.1
+        hostnames:
+        - rabbitmq
+      containers:
+      - name: rabbitmq
+        image: rabbitmq:3.12.4-management
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: RABBITMQ_NODENAME
+          value: rabbit@rabbitmq
+        ports:
+        - name: amqp
+          containerPort: 5672
+        - name: management
+          containerPort: 15672
+        - name: dist
+          containerPort: 25672
+        - name: prometheus
+          containerPort: 15692
+        readinessProbe:
+          tcpSocket:
+            port: amqp
+          periodSeconds: 10
+        startupProbe:
+          tcpSocket:
+            port: amqp
+          periodSeconds: 10
+          failureThreshold: 30
+        livenessProbe:
+          tcpSocket:
+            port: amqp
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 128Mi
+          limits:
+            memory: 384Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/rabbitmq"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  labels:
+    app: rabbitmq
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: rabbitmq
+  ports:
+  - name: amqp
+    port: 5672
+    targetPort: amqp
+  - name: management
+    port: 15672
+    targetPort: management
+  - name: dist
+    port: 25672
+    targetPort: dist
+  - name: prometheus
+    port: 15692
+    targetPort: prometheus

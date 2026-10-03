@@ -1,0 +1,98 @@
+# MinIO(storage-service 의 MINIO_ENDPOINT=http://minio:9000). compose 와 같은 릴리스.
+# imagePullPolicy: Never — 레지스트리가 막혀 있어 노드에 직접 넣는다(README: docker save … | ctr images import).
+# compose 의 shm_size 1gb 는 옮기지 않았다(기본 /dev/shm 64Mi; 메모리 limit 안에서 잡히는 tmpfs 라 크게 줄 수 없다).
+# 데이터는 compose 의 bind mount(MINIO_DATA_DIR) 대신 PVC.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  labels:
+    app: minio
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: data
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+        app.kubernetes.io/name: minio
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: minio
+        image: quay.io/minio/minio:RELEASE.2024-02-14T21-36-02Z
+        imagePullPolicy: Never
+        args:
+        - server
+        - "/data"
+        - "--console-address"
+        - ":9001"
+        env:
+        - name: MINIO_ROOT_USER
+          value: minio
+        - name: MINIO_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MINIO_ROOT_PASSWORD
+        ports:
+        - name: api
+          containerPort: 9000
+        - name: console
+          containerPort: 9001
+        readinessProbe:
+          httpGet:
+            path: "/minio/health/ready"
+            port: api
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: "/minio/health/live"
+            port: api
+          initialDelaySeconds: 20
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/data"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels:
+    app: minio
+    app.kubernetes.io/name: minio
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: minio
+  ports:
+  - name: api
+    port: 9000
+    targetPort: api
+  - name: console
+    port: 9001
+    targetPort: console

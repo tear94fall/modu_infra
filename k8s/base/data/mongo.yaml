@@ -1,0 +1,425 @@
+# MongoDB 3노드 replica set(mongo:7.0.8) — compose 의 mongo-01..03 과 같은 이름·포트(27017).
+# keyFile 은 Secret mongo-keyfile(data/mongodb/mongodb.key, create-infra-secret.sh). mongod 는 키 파일이 0400 이고 소유자가 자기(999)여야 해서
+# Secret 을 바로 쓰지 않고 init 컨테이너가 emptyDir 로 복사해 chown 999:999 · chmod 400 한다.
+# replica set 최초 구성 스크립트(data/mongodb/rs-init.sh 사본). mongo-01 의 /scripts 에 마운트 — 최초 1회만: kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongo-rs-init
+  labels:
+    app: mongo-rs-init
+    app.kubernetes.io/name: mongo-rs-init
+    app.kubernetes.io/component: data
+data:
+  rs-init.sh: |
+    #!/bin/bash
+    # replica set 최초 구성. mongo-01 컨테이너 안에서 실행한다: kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh
+    # 이미 구성된 replica set 에서 실행하면 force 로 설정을 덮어쓰므로 최초 1회만 쓴다.
+
+    mongosh -u admin -p "$MONGO_INITDB_ROOT_PASSWORD" <<EOF
+    var config = {
+        "_id": "mongo-rs",
+        "version": 1,
+        "members": [
+            {
+                "_id": 1,
+                "host": "mongo-01:27017",
+                "priority": 3
+            },
+            {
+                "_id": 2,
+                "host": "mongo-02:27017",
+                "priority": 2
+            },
+            {
+                "_id": 3,
+                "host": "mongo-03:27017",
+                "priority": 1
+            }
+        ]
+    };
+    rs.initiate(config, { force: true });
+    rs.status();
+
+    EOF
+---
+# mongo-0N: replSet mongo-rs, keyFile 인증. 멤버 주소는 rs-init.sh 의 mongo-0N:27017 = Service 이름.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo-01
+  labels:
+    app: mongo-01
+    app.kubernetes.io/name: mongo-01
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mongo-01
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo-01
+  template:
+    metadata:
+      labels:
+        app: mongo-01
+        app.kubernetes.io/name: mongo-01
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      initContainers:
+      - name: keyfile
+        image: mongo:7.0.8
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - "-ec"
+        - |
+          cp /secret/mongodb.key /keyfile/mongodb.key
+          chown 999:999 /keyfile/mongodb.key
+          chmod 400 /keyfile/mongodb.key
+        resources:
+          requests:
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: keyfile-secret
+          mountPath: "/secret"
+          readOnly: true
+        - name: keyfile
+          mountPath: "/keyfile"
+      volumes:
+      - name: keyfile-secret
+        secret:
+          secretName: mongo-keyfile
+      - name: keyfile
+        emptyDir: {}
+      - name: rs-init
+        configMap:
+          name: mongo-rs-init
+      containers:
+      - name: mongo
+        image: mongo:7.0.8
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--keyFile"
+        - "/keyfile/mongodb.key"
+        - "--bind_ip_all"
+        - "--replSet"
+        - mongo-rs
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: admin
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MONGO_ROOT_PASSWORD
+        ports:
+        - name: mongo
+          containerPort: 27017
+        readinessProbe:
+          tcpSocket:
+            port: mongo
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: mongo
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 256Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/data/db"
+        - name: keyfile
+          mountPath: "/keyfile"
+          readOnly: true
+        - name: rs-init
+          mountPath: "/scripts"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-01
+  labels:
+    app: mongo-01
+    app.kubernetes.io/name: mongo-01
+    app.kubernetes.io/component: data
+spec:
+  # headless: mongod 가 복제셋 설정의 mongo-0N 을 자기 주소로 알아보려면 Service 이름이 파드 IP 로 풀려야 한다(ClusterIP 면 "not a member" 로 기동 실패).
+  clusterIP: None
+  # 파드가 Ready 가 되기 전에도 이름이 풀려야 한다 — mongod 는 기동 중(Ready 전)에 자기 이름을 풀어 멤버인지 확인한다.
+  publishNotReadyAddresses: true
+  type: ClusterIP
+  selector:
+    app: mongo-01
+  ports:
+  - name: mongo
+    port: 27017
+    targetPort: mongo
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo-02
+  labels:
+    app: mongo-02
+    app.kubernetes.io/name: mongo-02
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mongo-02
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo-02
+  template:
+    metadata:
+      labels:
+        app: mongo-02
+        app.kubernetes.io/name: mongo-02
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      initContainers:
+      - name: keyfile
+        image: mongo:7.0.8
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - "-ec"
+        - |
+          cp /secret/mongodb.key /keyfile/mongodb.key
+          chown 999:999 /keyfile/mongodb.key
+          chmod 400 /keyfile/mongodb.key
+        resources:
+          requests:
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: keyfile-secret
+          mountPath: "/secret"
+          readOnly: true
+        - name: keyfile
+          mountPath: "/keyfile"
+      volumes:
+      - name: keyfile-secret
+        secret:
+          secretName: mongo-keyfile
+      - name: keyfile
+        emptyDir: {}
+      containers:
+      - name: mongo
+        image: mongo:7.0.8
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--keyFile"
+        - "/keyfile/mongodb.key"
+        - "--bind_ip_all"
+        - "--replSet"
+        - mongo-rs
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: admin
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MONGO_ROOT_PASSWORD
+        ports:
+        - name: mongo
+          containerPort: 27017
+        readinessProbe:
+          tcpSocket:
+            port: mongo
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: mongo
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 256Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/data/db"
+        - name: keyfile
+          mountPath: "/keyfile"
+          readOnly: true
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-02
+  labels:
+    app: mongo-02
+    app.kubernetes.io/name: mongo-02
+    app.kubernetes.io/component: data
+spec:
+  # headless: mongod 가 복제셋 설정의 mongo-0N 을 자기 주소로 알아보려면 Service 이름이 파드 IP 로 풀려야 한다(ClusterIP 면 "not a member" 로 기동 실패).
+  clusterIP: None
+  # 파드가 Ready 가 되기 전에도 이름이 풀려야 한다 — mongod 는 기동 중(Ready 전)에 자기 이름을 풀어 멤버인지 확인한다.
+  publishNotReadyAddresses: true
+  type: ClusterIP
+  selector:
+    app: mongo-02
+  ports:
+  - name: mongo
+    port: 27017
+    targetPort: mongo
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo-03
+  labels:
+    app: mongo-03
+    app.kubernetes.io/name: mongo-03
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mongo-03
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo-03
+  template:
+    metadata:
+      labels:
+        app: mongo-03
+        app.kubernetes.io/name: mongo-03
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      initContainers:
+      - name: keyfile
+        image: mongo:7.0.8
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - "-ec"
+        - |
+          cp /secret/mongodb.key /keyfile/mongodb.key
+          chown 999:999 /keyfile/mongodb.key
+          chmod 400 /keyfile/mongodb.key
+        resources:
+          requests:
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: keyfile-secret
+          mountPath: "/secret"
+          readOnly: true
+        - name: keyfile
+          mountPath: "/keyfile"
+      volumes:
+      - name: keyfile-secret
+        secret:
+          secretName: mongo-keyfile
+      - name: keyfile
+        emptyDir: {}
+      containers:
+      - name: mongo
+        image: mongo:7.0.8
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--keyFile"
+        - "/keyfile/mongodb.key"
+        - "--bind_ip_all"
+        - "--replSet"
+        - mongo-rs
+        env:
+        - name: MONGO_INITDB_ROOT_USERNAME
+          value: admin
+        - name: MONGO_INITDB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MONGO_ROOT_PASSWORD
+        ports:
+        - name: mongo
+          containerPort: 27017
+        readinessProbe:
+          tcpSocket:
+            port: mongo
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: mongo
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 256Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/data/db"
+        - name: keyfile
+          mountPath: "/keyfile"
+          readOnly: true
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-03
+  labels:
+    app: mongo-03
+    app.kubernetes.io/name: mongo-03
+    app.kubernetes.io/component: data
+spec:
+  # headless: mongod 가 복제셋 설정의 mongo-0N 을 자기 주소로 알아보려면 Service 이름이 파드 IP 로 풀려야 한다(ClusterIP 면 "not a member" 로 기동 실패).
+  clusterIP: None
+  # 파드가 Ready 가 되기 전에도 이름이 풀려야 한다 — mongod 는 기동 중(Ready 전)에 자기 이름을 풀어 멤버인지 확인한다.
+  publishNotReadyAddresses: true
+  type: ClusterIP
+  selector:
+    app: mongo-03
+  ports:
+  - name: mongo
+    port: 27017
+    targetPort: mongo

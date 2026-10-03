@@ -1,0 +1,46 @@
+# Pinpoint 에이전트를 JVM 서비스(이름이 *-service 인 Deployment)에 붙인다. compose 는 pinpoint-agent 볼륨을 마운트했지만
+# k8s 에선 init 컨테이너가 에이전트 이미지(컬렉터(3.1.0)와 같은 버전)에서 jar 를 emptyDir 로 복사한다.
+# JAVA_TOOL_OPTIONS 는 base 가 이미 쓰고 있어서(로그 MDC 옵션) java 런처가 읽는 JDK_JAVA_OPTIONS 로 따로 준다.
+# 에이전트 3.1: 로그 MDC 옵션은 -Dpinpoint.profiler.logback.logging.transactioninfo=true 처럼 pinpoint. 접두사로 덮어써진다.
+# 컬렉터 주소(profiler.transport.grpc.collector.ip)는 -D 로 안 바뀌어서(옛 키 pinpoint.collector.ip 도 무시) init 컨테이너가 설정 파일을 고친다.
+# applicationName 은 파드 라벨 app, agentId 는 파드 IP(24자 제한 안, 파드마다 다름). 컬렉터는 base/observability/pinpoint.yaml 의 Service pinpoint-collector.
+# 볼륨이 없던 Deployment 용(배열을 새로 만든다). storage·config 는 pinpoint-agent-patch-append.yaml.
+- op: add
+  path: /spec/template/spec/volumes
+  value:
+    - name: pinpoint-agent
+      emptyDir: {}
+- op: add
+  path: /spec/template/spec/initContainers
+  value:
+    - name: pinpoint-agent
+      image: pinpointdocker/pinpoint-agent:3.1.0
+      # 에이전트 설정의 컬렉터 주소 기본값이 127.0.0.1 이고 -D 로는 안 바뀐다(3.1). 복사하면서 pinpoint-collector 로 바꾼다.
+      command: ["sh", "-c", "cp -r /pinpoint-agent/. /agent/ && sed -i 's/^profiler.transport.grpc.collector.ip=.*/profiler.transport.grpc.collector.ip=pinpoint-collector/' /agent/pinpoint-root.config /agent/profiles/*/pinpoint.config && grep -h '^profiler.transport.grpc.collector.ip=' /agent/pinpoint-root.config"]
+      volumeMounts:
+        - name: pinpoint-agent
+          mountPath: /agent
+      resources:
+        requests: {memory: 32Mi, cpu: 50m}
+        limits: {memory: 64Mi}
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts
+  value:
+    - name: pinpoint-agent
+      mountPath: /pinpoint-agent
+      readOnly: true
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: PINPOINT_APP
+    valueFrom: {fieldRef: {fieldPath: "metadata.labels['app']"}}
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: POD_IP
+    valueFrom: {fieldRef: {fieldPath: status.podIP}}
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value:
+    name: JDK_JAVA_OPTIONS
+    value: "-javaagent:/pinpoint-agent/pinpoint-bootstrap.jar -Dpinpoint.profiler.profiles.active=release -Dpinpoint.applicationName=$(PINPOINT_APP) -Dpinpoint.agentId=$(POD_IP) -Dpinpoint.profiler.logback.logging.transactioninfo=true"
