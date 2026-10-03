@@ -1,0 +1,172 @@
+# OpenSearch + Dashboards — compose(monitoring/docker-compose.yml)와 같은 이미지·설정. 파드 로그는 otel-collector.yaml 이 여기로 보낸다.
+# OpenSearch 단일 노드(로그 저장소, 인덱스 modu-app-logs). dev 전용: 보안 플러그인 끔.
+# compose 의 ulimits memlock 은 옮기지 않았다(bootstrap.memory_lock 을 안 켜서 쓰이지 않는다). vm.max_map_count 는 노드(=Docker VM) 커널 값을
+# 그대로 쓴다 — compose 의 opensearch 가 같은 커널에서 돌았으므로 sysctl init 컨테이너(privileged)는 두지 않았다.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opensearch
+  labels:
+    app: opensearch
+    app.kubernetes.io/name: opensearch
+    app.kubernetes.io/component: observability
+spec:
+  serviceName: opensearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch
+  template:
+    metadata:
+      labels:
+        app: opensearch
+        app.kubernetes.io/name: opensearch
+        app.kubernetes.io/component: observability
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: opensearch
+        image: opensearchproject/opensearch:3.3.2
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: discovery.type
+          value: single-node
+        - name: cluster.name
+          value: modu-logs
+        - name: OPENSEARCH_JAVA_OPTS
+          value: "-Xms1g -Xmx1g"
+        - name: DISABLE_SECURITY_PLUGIN
+          value: 'true'
+        - name: DISABLE_INSTALL_DEMO_CONFIG
+          value: 'true'
+        ports:
+        - name: http
+          containerPort: 9200
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=3s'
+              >/dev/null
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=3s'
+              >/dev/null
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: http
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 1536Mi
+          limits:
+            memory: 1536Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/usr/share/opensearch/data"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  labels:
+    app: opensearch
+    app.kubernetes.io/name: opensearch
+    app.kubernetes.io/component: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: opensearch
+  ports:
+  - name: http
+    port: 9200
+    targetPort: http
+---
+# OpenSearch Dashboards. dev 오버레이가 LoadBalancer 5601 로 연다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensearch-dashboards
+  labels:
+    app: opensearch-dashboards
+    app.kubernetes.io/name: opensearch-dashboards
+    app.kubernetes.io/component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch-dashboards
+  template:
+    metadata:
+      labels:
+        app: opensearch-dashboards
+        app.kubernetes.io/name: opensearch-dashboards
+        app.kubernetes.io/component: observability
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: opensearch-dashboards
+        image: opensearchproject/opensearch-dashboards:3.3.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: OPENSEARCH_HOSTS
+          value: '["http://opensearch:9200"]'
+        - name: DISABLE_SECURITY_DASHBOARDS_PLUGIN
+          value: 'true'
+        ports:
+        - name: http
+          containerPort: 5601
+        readinessProbe:
+          tcpSocket:
+            port: http
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: http
+          initialDelaySeconds: 120
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 256Mi
+          limits:
+            memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch-dashboards
+  labels:
+    app: opensearch-dashboards
+    app.kubernetes.io/name: opensearch-dashboards
+    app.kubernetes.io/component: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: opensearch-dashboards
+  ports:
+  - name: http
+    port: 5601
+    targetPort: http

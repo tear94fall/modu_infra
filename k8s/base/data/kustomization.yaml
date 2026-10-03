@@ -1,0 +1,12 @@
+# 상태 있는 데이터 인프라 — compose(modu_infra/data/docker-compose.yml)를 그대로 옮긴 것. Service 이름·포트 = compose 컨테이너 이름·포트라
+# 앱 설정(config-repo, env)은 그대로다. 비밀번호는 Secret infra / mongo-keyfile(k8s/create-infra-secret.sh).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - mysql.yaml
+  - redis.yaml
+  - redis-cluster.yaml
+  - kafka.yaml
+  - mongo.yaml
+  - minio.yaml
+  - rabbitmq.yaml

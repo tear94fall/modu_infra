@@ -1,8 +1,7 @@
 # dev 오버레이: 로컬 Docker Desktop Kubernetes(context docker-desktop, 1 노드). 네임스페이스는 base 와 같은 modu.
-# 앱 계층만 k8s 에 띄우고, 상태 있는 인프라는 같은 Mac 의 docker compose 에 둔 채 infra-endpoints.yaml 로 잇는다.
-#   ./gen-infra-endpoints.sh        → infra-endpoints.yaml        (컨테이너 IP 가 바뀌면 다시)
+# 앱 계층 + 인프라(base/data, base/observability) 전부 k8s 안. 2026-10-03 에 compose 인프라와 infra-endpoints(headless Service + Endpoints)를 걷어냈다.
 #   ./gen-config-repo-configmaps.sh → config-repo-configmaps.yaml (modu_platform/config-repo 를 고치면 다시)
-# Secret config-service 는 여기 없다(secret.example.yaml 참고, README).
+# Secret 은 여기 없다: config-service(secret.example.yaml), infra·mongo-keyfile·mysqld-exporter(../../create-infra-secret.sh) — README.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -10,9 +9,8 @@ namespace: modu
 
 resources:
   - ../../base
-  - infra-endpoints.yaml
   - config-repo-configmaps.yaml
-  - nodeports.yaml
+  - loadbalancers.yaml
 
 # 이미지 태그. base 는 develop(브랜치 롤링 태그). CI 가 올린 태그(예: sha-…)로 바꿔 apply 하면 그 Deployment 만 롤아웃된다.
 images:
@@ -55,9 +53,9 @@ images:
 # 메모리 requests 합(JVM 14개×512Mi + nginx 4개×16Mi ≈ 7.1GiB)이 노드 allocatable 을 넘으면 Pending 이 된다 — Docker Desktop 메모리를 확인(README).
 replicas:
   - name: config-service
-    count: 2
+    count: 1
   - name: gateway-service
-    count: 2
+    count: 1
   - name: auth-service
     count: 1
   - name: member-service
@@ -88,3 +86,14 @@ replicas:
     count: 1
   - name: modu-internal
     count: 1
+
+# Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS). 이름이 -service 로 끝나는 JVM Deployment 전부(nginx 콘솔·웹 제외).
+patches:
+  - path: pinpoint-agent-patch.yaml
+    target:
+      kind: Deployment
+      name: "(auth|chat|chat-store|member|point|profile|push|schedule|ws|gateway|commerce)-service"
+  - path: pinpoint-agent-patch-append.yaml
+    target:
+      kind: Deployment
+      name: "(storage|config)-service"

@@ -1,0 +1,1125 @@
+# MySQL 10개 — compose(data/docker-compose.yml)의 컨테이너 이름 = Service 이름(:3306). 이름이 정확히 mysql-member 여야 해서 인스턴스마다 replicas 1 StatefulSet.
+# 메신저 4쌍(mysql:8.0.32, root=MYSQL_ROOT_PASSWORD, 앱 계정 user=MYSQL_USER_PASSWORD) + 커머스 1쌍(mysql:8.0.44, root=COMMERCE_DB_PASSWORD).
+# compose 의 depends_on(레플리카는 소스가 healthy 뒤에)은 k8s 에 없다 — 레플리카는 그냥 같이 뜨고, 복제는 replica-setup.sh 가 건다.
+# 비밀번호는 Secret infra(k8s/create-infra-secret.sh). 볼륨에 데이터가 있으면 MYSQL_* 초기화는 다시 일어나지 않는다.
+# mysql-member: 쓰기 DB(소스). server-id 11, GTID + ROW binlog(레플리카·Debezium 용).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-member
+  labels:
+    app: mysql-member
+    app.kubernetes.io/name: mysql-member
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-member
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-member
+  template:
+    metadata:
+      labels:
+        app: mysql-member
+        app.kubernetes.io/name: mysql-member
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=11"
+        - "--log-bin=mysql-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_DATABASE
+          value: modu-chat
+        - name: MYSQL_USER
+          value: user
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_USER_PASSWORD
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-member
+  labels:
+    app: mysql-member
+    app.kubernetes.io/name: mysql-member
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-member
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-member-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — 지금은 docker exec 기준, README).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-member-replica
+  labels:
+    app: mysql-member-replica
+    app.kubernetes.io/name: mysql-member-replica
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-member-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-member-replica
+  template:
+    metadata:
+      labels:
+        app: mysql-member-replica
+        app.kubernetes.io/name: mysql-member-replica
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=21"
+        - "--log-bin=mysql-bin"
+        - "--relay-log=relay-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--log-replica-updates=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-member-replica
+  labels:
+    app: mysql-member-replica
+    app.kubernetes.io/name: mysql-member-replica
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-member-replica
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-chat: 쓰기 DB(소스). server-id 12, GTID + ROW binlog(레플리카·Debezium 용).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-chat
+  labels:
+    app: mysql-chat
+    app.kubernetes.io/name: mysql-chat
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-chat
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-chat
+  template:
+    metadata:
+      labels:
+        app: mysql-chat
+        app.kubernetes.io/name: mysql-chat
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=12"
+        - "--log-bin=mysql-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_DATABASE
+          value: modu-chat
+        - name: MYSQL_USER
+          value: user
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_USER_PASSWORD
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-chat
+  labels:
+    app: mysql-chat
+    app.kubernetes.io/name: mysql-chat
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-chat
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-chat-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — 지금은 docker exec 기준, README).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-chat-replica
+  labels:
+    app: mysql-chat-replica
+    app.kubernetes.io/name: mysql-chat-replica
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-chat-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-chat-replica
+  template:
+    metadata:
+      labels:
+        app: mysql-chat-replica
+        app.kubernetes.io/name: mysql-chat-replica
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=22"
+        - "--log-bin=mysql-bin"
+        - "--relay-log=relay-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--log-replica-updates=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-chat-replica
+  labels:
+    app: mysql-chat-replica
+    app.kubernetes.io/name: mysql-chat-replica
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-chat-replica
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-push: 쓰기 DB(소스). server-id 13, GTID + ROW binlog(레플리카·Debezium 용).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-push
+  labels:
+    app: mysql-push
+    app.kubernetes.io/name: mysql-push
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-push
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-push
+  template:
+    metadata:
+      labels:
+        app: mysql-push
+        app.kubernetes.io/name: mysql-push
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=13"
+        - "--log-bin=mysql-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_DATABASE
+          value: modu-chat
+        - name: MYSQL_USER
+          value: user
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_USER_PASSWORD
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-push
+  labels:
+    app: mysql-push
+    app.kubernetes.io/name: mysql-push
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-push
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-push-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — 지금은 docker exec 기준, README).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-push-replica
+  labels:
+    app: mysql-push-replica
+    app.kubernetes.io/name: mysql-push-replica
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-push-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-push-replica
+  template:
+    metadata:
+      labels:
+        app: mysql-push-replica
+        app.kubernetes.io/name: mysql-push-replica
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=23"
+        - "--log-bin=mysql-bin"
+        - "--relay-log=relay-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--log-replica-updates=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-push-replica
+  labels:
+    app: mysql-push-replica
+    app.kubernetes.io/name: mysql-push-replica
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-push-replica
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-profile: 쓰기 DB(소스). server-id 14, GTID + ROW binlog(레플리카·Debezium 용).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-profile
+  labels:
+    app: mysql-profile
+    app.kubernetes.io/name: mysql-profile
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-profile
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-profile
+  template:
+    metadata:
+      labels:
+        app: mysql-profile
+        app.kubernetes.io/name: mysql-profile
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=14"
+        - "--log-bin=mysql-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_DATABASE
+          value: modu-chat
+        - name: MYSQL_USER
+          value: user
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_USER_PASSWORD
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-profile
+  labels:
+    app: mysql-profile
+    app.kubernetes.io/name: mysql-profile
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-profile
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-profile-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql/replica-setup.sh — 지금은 docker exec 기준, README).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-profile-replica
+  labels:
+    app: mysql-profile-replica
+    app.kubernetes.io/name: mysql-profile-replica
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-profile-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-profile-replica
+  template:
+    metadata:
+      labels:
+        app: mysql-profile-replica
+        app.kubernetes.io/name: mysql-profile-replica
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=24"
+        - "--log-bin=mysql-bin"
+        - "--relay-log=relay-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--log-replica-updates=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MYSQL_ROOT_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-profile-replica
+  labels:
+    app: mysql-profile-replica
+    app.kubernetes.io/name: mysql-profile-replica
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-profile-replica
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-commerce: 쓰기 DB(소스). server-id 1, GTID + ROW binlog(레플리카·Debezium 용).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-commerce
+  labels:
+    app: mysql-commerce
+    app.kubernetes.io/name: mysql-commerce
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-commerce
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-commerce
+  template:
+    metadata:
+      labels:
+        app: mysql-commerce
+        app.kubernetes.io/name: mysql-commerce
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.44
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--character-set-server=utf8mb4"
+        - "--collation-server=utf8mb4_unicode_ci"
+        - "--server-id=1"
+        - "--log-bin=mysql-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_DATABASE
+          value: commerce
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: COMMERCE_DB_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-commerce
+  labels:
+    app: mysql-commerce
+    app.kubernetes.io/name: mysql-commerce
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-commerce
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-commerce-replica: 읽기 DB(레플리카). DB·계정은 복제로 받는다. 복제는 처음 한 번 수동으로 건다(data/mysql-commerce/replica-setup.sh — 지금은 docker exec 기준, README).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-commerce-replica
+  labels:
+    app: mysql-commerce-replica
+    app.kubernetes.io/name: mysql-commerce-replica
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-commerce-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-commerce-replica
+  template:
+    metadata:
+      labels:
+        app: mysql-commerce-replica
+        app.kubernetes.io/name: mysql-commerce-replica
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.44
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--character-set-server=utf8mb4"
+        - "--collation-server=utf8mb4_unicode_ci"
+        - "--server-id=2"
+        - "--log-bin=mysql-bin"
+        - "--relay-log=relay-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--log-replica-updates=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: COMMERCE_DB_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 384Mi
+          limits:
+            memory: 768Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-commerce-replica
+  labels:
+    app: mysql-commerce-replica
+    app.kubernetes.io/name: mysql-commerce-replica
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-commerce-replica
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql

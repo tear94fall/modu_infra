@@ -8,25 +8,30 @@ modu 프로젝트(modu_messenger, modu_commerce)가 같이 쓰는 인프라와 �
 - modu_messenger — https://github.com/tear94fall/modu_chat (경로: `../modu_chat`)
 - modu_commerce — https://github.com/tear94fall/modu_commerce (경로: `../modu_commerce`)
 
-## 구성
+## 구성 (2026-10-03 부터 전부 k8s)
 
-| 디렉터리 | compose 프로젝트 | 내용 |
-|---|---|---|
-| `data/` | `modu-data` | MySQL 5, MongoDB replica set 3, Redis 단일 + 클러스터 6, ZooKeeper, Kafka, kafka-ui, Debezium, RabbitMQ, MinIO |
-| `monitoring/` | `monitoring` | Prometheus, Grafana, node/cadvisor/mysqld/redis/mongodb/kafka exporter, **로그: OpenSearch + Dashboards(5601) + OTel Collector** |
-| `pinpoint-docker/` | `pinpoint-docker` | Pinpoint APM. [pinpoint-apm/pinpoint-docker](https://github.com/pinpoint-apm/pinpoint-docker) 기반에 로컬 수정 포함: 네트워크 서브넷·collector IP, 웹 포트 18080, `docker-compose.override.yml`(pinpoint-mysql 13306, redis 16379 — data 스택 포트와 충돌 회피) |
+dev 환경은 **앱도 인프라도 Docker Desktop Kubernetes(context `docker-desktop`, 네임스페이스 `modu`)** 에서 돈다. 매니페스트와 운영 절차는 [`k8s/README.md`](k8s/README.md).
 
-data·monitoring 컨테이너와 modu_messenger·modu_commerce 서비스는 external 네트워크 `modu-infra` 에 붙고, 서비스는 컨테이너 이름(`mysql-chat`, `kafka`, `redis` …)으로 인프라에 접근합니다.
-pinpoint-docker 는 자체 네트워크 `pinpoint-docker_pinpoint` 를 쓰며, modu_messenger 서비스가 에이전트 연동을 위해 이 네트워크에도 붙습니다.
-Redis 클러스터 노드는 data 스택의 클러스터 전용 네트워크 `modu-data_redis-cluster` 의 고정 IP 를 광고하므로, modu_messenger 의 auth-service·member-service 는 이 네트워크에도 external 로 붙습니다. 그래서 data 스택의 compose 프로젝트 이름(`modu-data`)을 바꾸면 안 됩니다.
+| 디렉터리 | 내용 |
+|---|---|
+| `k8s/` | Kustomize 매니페스트 — `base/{platform,messenger,commerce,admin}` 앱 17개, `base/data`(MySQL 10, Redis, Redis 클러스터 6, ZooKeeper·Kafka·Debezium·kafka-ui, Mongo 3, MinIO, RabbitMQ), `base/observability`(OpenSearch·Dashboards, Prometheus·Grafana·exporter, Pinpoint, OTel Collector), `overlays/dev` |
+| `data/`, `monitoring/`, `pinpoint-docker/` | **예전 compose 구성(참고용).** 2026-10-03 에 k8s 로 옮기고 컨테이너·볼륨·네트워크는 지웠다. k8s 매니페스트의 원본 설정(명령·환경변수·헬스체크)을 찾아볼 때 본다 |
+| `data/mysql/` | 스키마 기준선·변경 이력·gh-ost·DBA 절차 — 여전히 유효(아래 "스키마 관리") |
 
-## 최초 준비
+## 최초 준비 / 기동
 
 ```bash
-docker network create modu-infra
-cp data/.env.example data/.env          # 값 채우기 (MINIO_DATA_DIR 포함 — minio 데이터를 bind mount 할 호스트 경로)
-# monitoring/.env, monitoring/mysql/.my.cnf, data/mongodb/mongodb.key 도 필요합니다 (git 제외)
+kubectl config use-context docker-desktop
+cd k8s
+kubectl apply -f base/namespace.yaml
+kubectl -n modu create secret generic config-service --from-literal=ENCRYPT_KEY=… --from-literal=INTERNAL_API_TOKEN=…   # modu_platform/.env 의 값
+./create-infra-secret.sh                      # data/.env, monitoring/.env, pinpoint-docker/.env 의 값으로 Secret infra·mongo-keyfile·mysqld-exporter
+overlays/dev/gen-config-repo-configmaps.sh    # modu_platform/config-repo → ConfigMap
+docker save quay.io/minio/minio:RELEASE.2024-02-14T21-36-02Z | docker exec -i desktop-control-plane ctr -n k8s.io images import -   # MinIO 이미지는 공개 저장소에서 더 못 받는다
+kubectl apply -k overlays/dev
 ```
+
+Mac 에서 들어가는 포트(LoadBalancer): 게이트웨이 8000 · 콘솔 8081/8084/8085 · 커머스 웹 8082 · config 8888 · OpenSearch Dashboards 5601 · Grafana 3000 · Prometheus 19090 · Pinpoint 18080 · kafka-ui 9009 · MinIO 9000/9001 · RabbitMQ 15672. DB·Kafka·Redis 는 밖에 열지 않는다(`kubectl port-forward`).
 
 ## 로그
 
@@ -37,7 +42,7 @@ cp data/.env.example data/.env          # 값 채우기 (MINIO_DATA_DIR 포함 �
 | `modu-app-logs` | 앱 스택 컨테이너 전부 — 서비스·게이트웨이·config·커머스 웹·콘솔 nginx. JSON 줄은 필드를 풀고(`attributes.service`, `requestId` …), JVM 경고 같은 비 JSON 줄은 `body` 그대로 | compose 프로젝트가 `modu-messenger`·`modu-platform`·`modu-commerce`·`modu_admin` |
 | `modu-infra-logs` | MySQL·Kafka·Mongo·Redis·MinIO·exporter·OpenSearch 자신 등 | 그 밖의 프로젝트(`modu-data`, `monitoring` …) |
 
-모든 compose 파일(여기 둘 + 앱 저장소 넷)에 `x-logging` 앵커가 있어, 줄마다 `attributes.container`(compose 서비스 이름)와 `attributes.project` 가 붙고 로그 파일은 50MB×3 으로 돌아갑니다. 라벨은 컨테이너를 **다시 만들 때** 붙으므로 compose 를 바꾼 뒤 `docker compose up -d` 가 필요합니다.
+k8s 에선 `otel-collector` DaemonSet(`k8s/base/observability/otel-collector.yaml`)이 `/var/log/pods/modu_*` 를 읽어 `attributes.container`(컨테이너 이름)·`attributes.project: k8s` 를 붙입니다. (compose 시절의 `x-logging` 라벨 방식은 `monitoring/otel/` 에 참고용으로 남아 있습니다.)
 
 - 대시보드: http://localhost:5601 (Discover → 인덱스 패턴 `modu-app-logs*`(기본) / `modu-infra-logs*`). dev 라 보안 플러그인은 꺼 두었고 9200 은 localhost 에만 열려 있습니다.
 - 모든 앱 로그 줄에 MDC 가 붙습니다: `requestId`(게이트웨이가 `X-Request-Id` 로 발급·전파), `userId`, `service`, Pinpoint `PtxId`/`PspanId`. 한 요청을 따라가려면 `attributes.requestId:<id>` 로 검색합니다. `PtxId` 로는 Pinpoint 의 호출 트리와 맞춰 볼 수 있습니다.
@@ -51,44 +56,11 @@ MySQL 스키마는 애플리케이션이 아니라 DBA 가 gh-ost 로 바꿉니�
 - `data/mysql/schema/*.sql` — 스키마 기준선 7개, `schema/changes/` — 변경 이력, `schema/checks/` — 고아 행 점검
 - `data/mysql/ghost.sh` — gh-ost 실행, `ghost-user-setup.sh` — gh-ost 계정, `dump-schema.sh` — 기준선 갱신, `check-orphans.sh` — 점검
 
-## 기동 순서
-
-1. `cd pinpoint-docker && docker compose up -d` — 계속 띄워 둘 필요는 없지만, modu_messenger 가 external 네트워크 `pinpoint-docker_pinpoint` 와 볼륨 `pinpoint-docker_data-volume` 을 참조하므로 messenger 를 처음 띄우기 전에 한 번은 `up` 을 해서 이 둘을 만들어 둬야 합니다. `docker network create pinpoint-docker_pinpoint` 로 네트워크만 만드는 것은 대체가 안 됩니다 — pinpoint-docker 는 이 네트워크에 고정 서브넷과 collector 고정 IP 를 기대하기 때문입니다. 그러니 한 번은 실제로 `up` 하는 것을 권장합니다. (HBase 준비에 수 분)
-2. `cd data && docker compose up -d`
-3. `cd monitoring && docker compose up -d`
-4. `cd ../modu_chat/backend && docker compose up -d` (modu_messenger)
-5. `cd ../modu_commerce/backend && docker compose up -d` (modu_commerce)
-
-프로젝트 사이에는 `depends_on` 을 걸 수 없어서, 인프라가 늦게 뜨면 서비스는 restart 정책으로 재시도합니다.
-
-Redis 클러스터는 별도 init 컨테이너 없이 `redis-node-1` 이 직접 만듭니다. 기동할 때 6노드가 모두 응답하면 슬롯이 비어 있을 때(최초 1회)만 `redis-cli --cluster create` 를 실행하고, 이미 구성돼 있으면 `docker logs redis-node-1` 에 `redis cluster already formed` 가 남습니다. `redis-node-1` 은 `cluster_state:ok` 가 되어야 healthy 입니다.
-
-## 접속 주소와 포트
-
-| 대상 | 호스트 포트 |
-|---|---|
-| mysql-member / chat / push / profile (쓰기, 복제 소스) | 3306 / 3307 / 3308 / 3309 |
-| mysql-member-replica / chat / push / profile (읽기, 복제 레플리카) | 3326 / 3327 / 3328 / 3329 |
-| mysql-commerce (쓰기, 복제 소스) | 3316 |
-| mysql-commerce-replica (읽기, 복제 레플리카) | 3317 |
-| mongo-01 / 02 / 03 | 27017 / 27018 / 27019 |
-| redis (단일) | 6379 |
-| redis-node-1~6 | 호스트 포트 없음 (modu-infra 네트워크에서 `redis-node-N:6379`) |
-| zookeeper | 2181 |
-| kafka | 29092 (호스트), 컨테이너 간 `kafka:9092` |
-| kafka-ui | http://localhost:9009 |
-| debezium | http://localhost:8083 |
-| rabbitmq | 5672, 관리 http://localhost:15672, 클러스터/CLI 25672 |
-| minio | 9000, 콘솔 http://localhost:9001 |
-| Prometheus | http://localhost:19090 |
-| Grafana | http://localhost:3000 |
-| Pinpoint | http://localhost:18080 (pinpoint-mysql 13306, pinpoint redis 16379) |
-
 ## 운영 스크립트
 
 - `data/kafka/*.sh`: 토픽 생성·조회·삭제. `copy-script.sh` 는 상대 경로로 스크립트 파일 이름을 참조하므로 반드시 `data/kafka` 디렉터리에서 실행해야 합니다 (kafka 컨테이너에 복사해서 사용).
 - `data/debezium/*.sh`: 커넥터 등록·조회·삭제 (`create_connector.sh` 는 `data/.env` 의 비밀번호 사용)
-- `data/mongodb/rs-init.sh`: replica set 최초 구성 (`docker exec mongo-01 bash /scripts/rs-init.sh`, 최초 1회만)
+- `data/mongodb/rs-init.sh`: replica set 최초 구성 (k8s: `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh`, 최초 1회만 — 지금 데이터는 이미 구성돼 있다)
 - `data/mysql/replica-setup.sh <대상>`: MySQL 읽기·쓰기 분리. 소스(GTID·binlog ROW) → 레플리카 GTID 비동기 복제를 건다. `data/` 에서 실행, 여러 번 돌려도 된다.
   - 대상: `member` `chat` `push` `profile` `commerce`, 묶음 `messenger`(앞의 넷) `all`. (`mysql-commerce/replica-setup.sh` 는 `commerce` 를 부르는 껍데기)
   - 복제 계정 `repl` 과 앱 읽기 계정(메신저 `modu_ro`, 커머스 `commerce_ro`, SELECT 만)을 소스에 만든다(복제로 레플리카에 전파). 비밀번호는 `data/.env` 의 `MESSENGER_REPL_PASSWORD`·`MESSENGER_RO_PASSWORD`, `COMMERCE_REPL_PASSWORD`·`COMMERCE_RO_PASSWORD`.
@@ -101,4 +73,4 @@ Redis 클러스터는 별도 init 컨테이너 없이 `redis-node-1` 이 직접 
 
 - 같은 이름의 다른 로컬 인프라 스택(monitoring, pinpoint-docker, mongodb 등)이 따로 떠 있으면 컨테이너 이름·포트가 겹쳐 동시에 띄울 수 없습니다.
 - `data/.env` 의 비밀번호는 볼륨에 저장된 현재 비밀번호와 같아야 합니다 (healthcheck 가 사용).
-- 볼륨을 지우는 명령(`docker compose down -v`, `docker volume prune`)은 데이터를 지웁니다.
+- PVC 를 지우면(StorageClass reclaim Delete) 데이터도 지워집니다. `kubectl delete -k overlays/dev` 는 PVC 를 지우지 않지만 StatefulSet 을 지우고 다시 만들 때 이름이 같아야 같은 PVC 에 붙습니다.

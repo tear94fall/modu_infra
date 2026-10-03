@@ -1,0 +1,271 @@
+# Prometheus exporter 4개 — compose 와 같은 이미지·이름·포트(prometheus.yml 의 대상 이름 그대로).
+# node-exporter·cadvisor 는 옮기지 않았다(도커 호스트 지표). 컨테이너 지표는 prometheus.yaml 의 kubelet cAdvisor 잡.
+# mysqld-exporter: multi-target(/probe?target=mysql-member:3306&auth_module=client). 자격증명은 monitoring/mysql/.my.cnf
+# ([client] 메신저 root, [client.commerce] 커머스 root) → Secret mysqld-exporter(create-infra-secret.sh).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysqld-exporter
+  labels:
+    app: mysqld-exporter
+    app.kubernetes.io/name: mysqld-exporter
+    app.kubernetes.io/component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysqld-exporter
+  template:
+    metadata:
+      labels:
+        app: mysqld-exporter
+        app.kubernetes.io/name: mysqld-exporter
+        app.kubernetes.io/component: observability
+    spec:
+      enableServiceLinks: false
+      volumes:
+      - name: my-cnf
+        secret:
+          secretName: mysqld-exporter
+      containers:
+      - name: mysqld-exporter
+        image: prom/mysqld-exporter:v0.20.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--config.my-cnf=/cfg/.my.cnf"
+        ports:
+        - name: metrics
+          containerPort: 9104
+        readinessProbe:
+          tcpSocket:
+            port: metrics
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+        volumeMounts:
+        - name: my-cnf
+          mountPath: "/cfg"
+          readOnly: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysqld-exporter
+  labels:
+    app: mysqld-exporter
+    app.kubernetes.io/name: mysqld-exporter
+    app.kubernetes.io/component: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: mysqld-exporter
+  ports:
+  - name: metrics
+    port: 9104
+    targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-exporter
+  labels:
+    app: redis-exporter
+    app.kubernetes.io/name: redis-exporter
+    app.kubernetes.io/component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-exporter
+  template:
+    metadata:
+      labels:
+        app: redis-exporter
+        app.kubernetes.io/name: redis-exporter
+        app.kubernetes.io/component: observability
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: redis-exporter
+        image: oliver006/redis_exporter:v1.90.0
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: REDIS_ADDR
+          value: redis://redis:6379
+        ports:
+        - name: metrics
+          containerPort: 9121
+        readinessProbe:
+          tcpSocket:
+            port: metrics
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-exporter
+  labels:
+    app: redis-exporter
+    app.kubernetes.io/name: redis-exporter
+    app.kubernetes.io/component: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: redis-exporter
+  ports:
+  - name: metrics
+    port: 9121
+    targetPort: metrics
+---
+# mongodb-exporter: compose 는 --mongodb.uri=${MONGODB_URI} 인자였다. exporter 가 MONGODB_URI env 를 같은 플래그로 읽으므로 Secret 에서 env 로 준다(인자에 비밀번호가 안 보인다).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mongodb-exporter
+  labels:
+    app: mongodb-exporter
+    app.kubernetes.io/name: mongodb-exporter
+    app.kubernetes.io/component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongodb-exporter
+  template:
+    metadata:
+      labels:
+        app: mongodb-exporter
+        app.kubernetes.io/name: mongodb-exporter
+        app.kubernetes.io/component: observability
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: mongodb-exporter
+        image: percona/mongodb_exporter:0.40
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--collect-all"
+        env:
+        - name: MONGODB_URI
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: MONGODB_URI
+        ports:
+        - name: metrics
+          containerPort: 9216
+        readinessProbe:
+          tcpSocket:
+            port: metrics
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb-exporter
+  labels:
+    app: mongodb-exporter
+    app.kubernetes.io/name: mongodb-exporter
+    app.kubernetes.io/component: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: mongodb-exporter
+  ports:
+  - name: metrics
+    port: 9216
+    targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-exporter
+  labels:
+    app: kafka-exporter
+    app.kubernetes.io/name: kafka-exporter
+    app.kubernetes.io/component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-exporter
+  template:
+    metadata:
+      labels:
+        app: kafka-exporter
+        app.kubernetes.io/name: kafka-exporter
+        app.kubernetes.io/component: observability
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: kafka-exporter
+        image: danielqsj/kafka-exporter:v1.9.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - "--kafka.server=kafka:9092"
+        ports:
+        - name: metrics
+          containerPort: 9308
+        readinessProbe:
+          tcpSocket:
+            port: metrics
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: metrics
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 16Mi
+          limits:
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-exporter
+  labels:
+    app: kafka-exporter
+    app.kubernetes.io/name: kafka-exporter
+    app.kubernetes.io/component: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka-exporter
+  ports:
+  - name: metrics
+    port: 9308
+    targetPort: metrics

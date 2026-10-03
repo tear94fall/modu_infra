@@ -1,0 +1,337 @@
+# ZooKeeper + Kafka + Debezium + Kafka UI — compose(data/docker-compose.yml)와 같은 이미지·이름·포트.
+# ZooKeeper(Kafka 용). data·log 두 볼륨은 compose 와 같은 경로.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: zookeeper
+  labels:
+    app: zookeeper
+    app.kubernetes.io/name: zookeeper
+    app.kubernetes.io/component: data
+spec:
+  serviceName: zookeeper
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+        app.kubernetes.io/name: zookeeper
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: zookeeper
+        image: confluentinc/cp-zookeeper:7.6.1
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: ZOOKEEPER_CLIENT_PORT
+          value: '2181'
+        - name: ZOOKEEPER_TICK_TIME
+          value: '2000'
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms128m -Xmx256m"
+        ports:
+        - name: client
+          containerPort: 2181
+        readinessProbe:
+          tcpSocket:
+            port: client
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: client
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 128Mi
+          limits:
+            memory: 384Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/zookeeper/data"
+        - name: log
+          mountPath: "/var/lib/zookeeper/log"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 1Gi
+  - metadata:
+      name: log
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zookeeper
+  labels:
+    app: zookeeper
+    app.kubernetes.io/name: zookeeper
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: zookeeper
+  ports:
+  - name: client
+    port: 2181
+    targetPort: client
+---
+# Kafka 브로커 1개. 리스너는 PLAINTEXT://kafka:9092 하나(compose 의 PLAINTEXT_INTERNAL localhost:29092 는 호스트용이라 뺐다 — 맥에서는 port-forward).
+# data 의 meta.properties cluster.id 가 zookeeper data 에 저장된 값과 같아야 뜬다 — 두 볼륨은 짝이다(한쪽만 지우거나 바꾸지 않는다).
+# enableServiceLinks: false 가 꼭 필요하다 — Service kafka 때문에 생기는 KAFKA_PORT env 를 cp-kafka 가 설정으로 읽고 "port is deprecated" 로 죽는다.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: data
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+        app.kubernetes.io/name: kafka
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: kafka
+        image: confluentinc/cp-kafka:7.6.1
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KAFKA_BROKER_ID
+          value: '1'
+        - name: KAFKA_ZOOKEEPER_CONNECT
+          value: zookeeper:2181
+        - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+          value: PLAINTEXT:PLAINTEXT
+        - name: KAFKA_ADVERTISED_LISTENERS
+          value: PLAINTEXT://kafka:9092
+        - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+          value: '1'
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms512m -Xmx512m"
+        ports:
+        - name: kafka
+          containerPort: 9092
+        readinessProbe:
+          tcpSocket:
+            port: kafka
+          periodSeconds: 10
+        startupProbe:
+          tcpSocket:
+            port: kafka
+          periodSeconds: 10
+          failureThreshold: 30
+        livenessProbe:
+          tcpSocket:
+            port: kafka
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 512Mi
+          limits:
+            memory: 1Gi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/kafka/data"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app: kafka
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka
+  ports:
+  - name: kafka
+    port: 9092
+    targetPort: kafka
+---
+# Debezium Kafka Connect. 커넥터 설정·오프셋·상태는 kafka 토픽에 있어서 상태 없음(Deployment).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: debezium
+  labels:
+    app: debezium
+    app.kubernetes.io/name: debezium
+    app.kubernetes.io/component: data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debezium
+  template:
+    metadata:
+      labels:
+        app: debezium
+        app.kubernetes.io/name: debezium
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: debezium
+        image: debezium/connect:2.5.0.Final
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: GROUP_ID
+          value: '1'
+        - name: CONFIG_STORAGE_TOPIC
+          value: debezium-config
+        - name: OFFSET_STORAGE_TOPIC
+          value: debezium-offset
+        - name: STATUS_STORAGE_TOPIC
+          value: debezium-status
+        - name: BOOTSTRAP_SERVERS
+          value: kafka:9092
+        - name: HEAP_OPTS
+          value: "-Xms256M -Xmx512M"
+        ports:
+        - name: http
+          containerPort: 8083
+        readinessProbe:
+          httpGet:
+            path: "/"
+            port: http
+          initialDelaySeconds: 20
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: http
+          initialDelaySeconds: 90
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 256Mi
+          limits:
+            memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: debezium
+  labels:
+    app: debezium
+    app.kubernetes.io/name: debezium
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: debezium
+  ports:
+  - name: http
+    port: 8083
+    targetPort: http
+---
+# Kafka UI. dev 오버레이가 LoadBalancer 9009 → 8080 으로 연다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  labels:
+    app: kafka-ui
+    app.kubernetes.io/name: kafka-ui
+    app.kubernetes.io/component: data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-ui
+  template:
+    metadata:
+      labels:
+        app: kafka-ui
+        app.kubernetes.io/name: kafka-ui
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: kafka-ui
+        image: provectuslabs/kafka-ui:v0.7.2
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: KAFKA_CLUSTERS_0_NAME
+          value: kafka-ui
+        - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+          value: kafka:9092
+        - name: KAFKA_CLUSTERS_0_ZOOKEEPER
+          value: zookeeper:2181
+        ports:
+        - name: http
+          containerPort: 8080
+        readinessProbe:
+          tcpSocket:
+            port: http
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 20
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: 256Mi
+          limits:
+            memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  labels:
+    app: kafka-ui
+    app.kubernetes.io/name: kafka-ui
+    app.kubernetes.io/component: data
+spec:
+  type: ClusterIP
+  selector:
+    app: kafka-ui
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
