@@ -39,11 +39,17 @@ data:
             type: add
             field: attributes.project
             value: k8s
+          # 인프라 컨테이너(DB·Kafka·관측 등) 줄은 modu-infra-logs 로, 나머지(앱 JSON + 앱의 비 JSON 줄)는 modu-app-logs 로 — compose 시절과 같은 두 인덱스.
+          - id: infra_mark
+            type: add
+            field: attributes.project
+            value: k8s-infra
+            if: 'attributes.container matches "^(mysql-|redis|redis-node-|zookeeper|kafka|kafka-ui|debezium|mongo-|minio|rabbitmq|opensearch|opensearch-dashboards|prometheus|grafana|.*-exporter|pinpoint-|zoo1|otel-collector)"'
           - id: route
             type: router
             routes:
               - output: app
-                expr: 'body matches "^\\{\"@timestamp\".*\\}\\s*$"'
+                expr: 'attributes.project != "k8s-infra" and body matches "^\\{\"@timestamp\".*\\}\\s*$"'
             default: done
           - id: app
             type: json_parser
@@ -67,25 +73,41 @@ data:
     processors:
       batch:
         timeout: 2s
+      filter/app:
+        logs:
+          log_record:
+            - 'attributes["project"] == "k8s-infra"'
+      filter/infra:
+        logs:
+          log_record:
+            - 'attributes["project"] != "k8s-infra"'
       resource:
         attributes:
           - key: deployment.environment
             value: dev-k8s
             action: upsert
     exporters:
-      opensearch:
+      opensearch/app:
         http:
           endpoint: http://opensearch:9200
         logs_index: modu-app-logs
+      opensearch/infra:
+        http:
+          endpoint: http://opensearch:9200
+        logs_index: modu-infra-logs
     service:
       telemetry:
         logs:
           level: warn
       pipelines:
-        logs:
+        logs/app:
           receivers: [filelog]
-          processors: [resource, batch]
-          exporters: [opensearch]
+          processors: [filter/app, resource, batch]
+          exporters: [opensearch/app]
+        logs/infra:
+          receivers: [filelog]
+          processors: [filter/infra, resource, batch]
+          exporters: [opensearch/infra]
 ---
 apiVersion: apps/v1
 kind: DaemonSet
