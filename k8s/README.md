@@ -218,6 +218,7 @@ compose 볼륨의 데이터 디렉터리를 **통째로** PVC 에 복사했다(�
 - **Pinpoint 에이전트 컬렉터 주소**: `-D` 로는 안 바뀐다 — init 컨테이너에서 설정 파일을 고친다.
 - **compose 쪽 컨테이너 IP 가 바뀌면** headless Endpoints 가 어긋나 앱이 멈춘 것처럼 보였다(이제 compose 가 없으니 해당 없음).
 - **13개 JVM 템플릿을 한꺼번에 바꾸지 말 것** — 위 "롤아웃은 한 번에 하나씩".
+- **NetworkPolicy 는 쓰지 말 것(Docker Desktop)**: kindnet 이 NetworkPolicy 를 nftables queue 로 강제하는데(`nft list table inet kindnet-network-policies`) verdict 가 `netlink send: i/o timeout` 으로 실패하면 **정책에 걸린 파드로 가는 파드→파드 패킷이 전부 버려진다**(노드→NodePort 만 됨). 2026-10-04 Argo CD 설치 직후 UI 8090 이 먹통이 된 원인 — 공식 매니페스트의 NetworkPolicy 7개를 `cicd/argocd/kustomization.yaml` 에서 지운다. 증상이 또 나오면 `kubectl get networkpolicy -A` 로 정책이 있는지부터 본다.
 
 ## Pinpoint 켜기/끄기
 

@@ -16,6 +16,15 @@ resources:
   - applications.yaml
 
 patches:
+  # NetworkPolicy 7개 제거. Docker Desktop(kind) 의 kindnet 은 NetworkPolicy 를 nftables queue 로 강제하는데 그 verdict 가 "netlink send: i/o timeout" 으로
+  # 실패하면 정책에 걸린 파드(Argo 7개)로 가는 파드→파드 패킷이 전부 버려진다(2026-10-04 실제: UI 8090 먹통, 노드→NodePort 만 됨). 1 노드 dev 에선 정책이 주는 게 없다.
+  - target: {kind: NetworkPolicy}
+    patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: ignored
   # HTTP(자체 서명 TLS 없이). LoadBalancer 가 8080(http) 으로 바로 간다.
   - patch: |-
       apiVersion: v1
