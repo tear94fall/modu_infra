@@ -40,11 +40,20 @@ data:
             field: attributes.project
             value: k8s
           # 인프라 컨테이너(DB·Kafka·관측 등) 줄은 modu-infra-logs 로, 나머지(앱 JSON + 앱의 비 JSON 줄)는 modu-app-logs 로 — compose 시절과 같은 두 인덱스.
+          # 파드 이름(StatefulSet 은 mysql-member-0 처럼 그대로)을 pod 필드로. 컨테이너 이름은 StatefulSet 에서 mysql·mongo 처럼 generic 이라 구분에 못 쓴다.
+          - id: pod_name
+            type: copy
+            from: resource["k8s.pod.name"]
+            to: attributes.pod
           - id: infra_mark
             type: add
             field: attributes.project
             value: k8s-infra
-            if: 'attributes.container matches "^(mysql-|redis|redis-node-|zookeeper|kafka|kafka-ui|debezium|mongo-|minio|rabbitmq|opensearch|opensearch-dashboards|prometheus|grafana|.*-exporter|pinpoint-|zoo1|otel-collector)"'
+            if: 'attributes.pod matches "^(mysql-|redis-|zookeeper-|kafka-|debezium-|mongo-|minio-|rabbitmq-|opensearch-|prometheus-|grafana-|[a-z]+-exporter-|pinpoint-|zoo1-|otel-collector-)"'
+          # 가치 없는 줄은 버린다: 헬스체크 접근 로그(kube-probe), Pinpoint 에이전트 자체 로그(JSON 아님), JVM 옵션 안내, Mongo 연결 수락/종료(22943·22944)
+          - id: drop_noise
+            type: filter
+            expr: 'body contains "kube-probe/" or body matches "^[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\\.[0-9]{3} " or body contains "StatusConsoleListener" or body contains "Picked up JDK_JAVA_OPTIONS" or body contains "Picked up JAVA_TOOL_OPTIONS" or body contains "\"id\":22943" or body contains "\"id\":22944"'
           - id: route
             type: router
             routes:
@@ -68,8 +77,21 @@ data:
           - id: app_ts
             type: remove
             field: attributes["@timestamp"]
+          # 보기 좋게: 파일 경로·스트림 같은 수집 메타데이터는 뺀다
           - id: done
-            type: noop
+            type: remove
+            field: attributes["log.file.path"]
+          - id: rm_logfile
+            type: remove
+            field: attributes["log.file.name"]
+          - id: rm_logtag
+            type: remove
+            field: attributes.logtag
+            if: 'attributes.logtag != nil'
+          - id: rm_iostream
+            type: remove
+            field: attributes["log.iostream"]
+            if: 'attributes["log.iostream"] != nil'
     processors:
       batch:
         timeout: 2s
