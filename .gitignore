@@ -7,6 +7,3 @@ k8s/mongodb.key
 *.bak
 
 .DS_Store
-
-# k8s dev 오버레이의 생성 파일(config-repo 복사본) — 적용 전에 gen-config-repo-configmaps.sh 로 만든다
-k8s/overlays/dev/config-repo-configmaps.yaml

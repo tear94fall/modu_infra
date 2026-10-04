@@ -1,0 +1,71 @@
+# Argo CD (GitOps 컨트롤러) — 네임스페이스 argocd. 공식 cluster-install 매니페스트(버전 고정)에 dev 용 패치만 얹는다.
+#   설치:  kubectl apply -k k8s/cicd/argocd      (CRD 가 커서 첫 apply 는 server-side 로: kubectl apply --server-side -k …)
+#   UI:    http://localhost:8090  (admin / `kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`)
+#   Application 들은 applications.yaml (modu-dev = modu_infra k8s/overlays/dev, modu-config-repo = modu_platform 루트 kustomization).
+# 뺀 것: dex(SSO 없음), notifications, applicationset — replicas 0(메모리). 쓰게 되면 1 로.
+# 동기화는 수동(버튼) — 머지해도 Sync 를 눌러야 적용된다. self-heal 은 Argo 에서 자동 동기화의 하위 옵션이라 수동 모드엔 없다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argocd
+
+resources:
+  - namespace.yaml
+  - https://github.com/argoproj/argo-cd/manifests/cluster-install?ref=v3.5.3
+  - loadbalancer.yaml
+  - applications.yaml
+
+patches:
+  # HTTP(자체 서명 TLS 없이). LoadBalancer 가 8080(http) 으로 바로 간다.
+  - patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: argocd-cmd-params-cm
+      data:
+        server.insecure: "true"
+  # 추적을 라벨 대신 annotation 으로(app.kubernetes.io/instance 라벨을 모든 객체에 덧붙이지 않는다 — Argo 권장).
+  - patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: argocd-cm
+      data:
+        application.resourceTrackingMethod: annotation
+        timeout.reconciliation: 180s
+  - target: {kind: Deployment, name: argocd-dex-server}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+  - target: {kind: Deployment, name: argocd-notifications-controller}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+  - target: {kind: Deployment, name: argocd-applicationset-controller}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 0
+  # 메모리 상한(1 노드 dev). 합계 limits ≈ 1.1GiB, requests ≈ 300MiB.
+  - target: {kind: Deployment, name: argocd-server}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value: {requests: {memory: 64Mi, cpu: 50m}, limits: {memory: 256Mi}}
+  - target: {kind: Deployment, name: argocd-repo-server}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value: {requests: {memory: 128Mi, cpu: 50m}, limits: {memory: 512Mi}}
+  - target: {kind: StatefulSet, name: argocd-application-controller}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value: {requests: {memory: 128Mi, cpu: 100m}, limits: {memory: 512Mi}}
+  - target: {kind: Deployment, name: argocd-redis}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value: {requests: {memory: 16Mi, cpu: 10m}, limits: {memory: 128Mi}}

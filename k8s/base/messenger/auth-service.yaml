@@ -2,6 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: auth-service
+  annotations:
+    # Argo CD sync-wave: JVM Deployment 는 한 번에 하나씩 롤아웃(앞 wave 가 Healthy 돼야 다음). 인프라·nginx 는 0(기본).
+    argocd.argoproj.io/sync-wave: "3"
   labels:
     app: auth-service
     app.kubernetes.io/name: auth-service
