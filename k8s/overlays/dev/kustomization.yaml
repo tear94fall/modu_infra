@@ -86,14 +86,29 @@ replicas:
     count: 1
   - name: modu-internal
     count: 1
+  # Pinpoint 스택 — dev 에선 꺼 둠(아래 patches 주석 참고). PVC(pinpoint-hbase-data, pinpoint-mysql)는 남아 있어 켜면 데이터가 이어진다.
+  - name: zoo1
+    count: 0
+  - name: pinpoint-hbase
+    count: 0
+  - name: pinpoint-mysql
+    count: 0
+  - name: pinpoint-redis
+    count: 0
+  - name: pinpoint-collector
+    count: 0
+  - name: pinpoint-web
+    count: 0
 
-# Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS). 이름이 -service 로 끝나는 JVM Deployment 전부(nginx 콘솔·웹 제외).
-patches:
-  - path: pinpoint-agent-patch.yaml
-    target:
-      kind: Deployment
-      name: "(auth|chat|chat-store|member|point|profile|push|schedule|ws|gateway|commerce)-service"
-  - path: pinpoint-agent-patch-append.yaml
-    target:
-      kind: Deployment
-      name: "(storage|config)-service"
+# Pinpoint — dev 에선 2026-10-04 부터 꺼 둔다(결정: APM 은 운영 환경에서만, dev 는 필요할 때 켠다). 메모리 상한 약 4.6GiB 를 비워
+# Argo CD·GoCD 자리로 쓴다. 켜는 법은 README "Pinpoint 켜기/끄기". 아래 patches 를 되살리고 replicas 의 Pinpoint 6개를 1 로.
+# 에이전트 패치를 되살리면 JVM 13개 템플릿이 한꺼번에 바뀌므로 README 의 "롤아웃은 한 번에 하나씩" 절차로 apply 할 것.
+#patches:
+#  - path: pinpoint-agent-patch.yaml
+#    target:
+#      kind: Deployment
+#      name: "(auth|chat|chat-store|member|point|profile|push|schedule|ws|gateway|commerce)-service"
+#  - path: pinpoint-agent-patch-append.yaml
+#    target:
+#      kind: Deployment
+#      name: "(storage|config)-service"

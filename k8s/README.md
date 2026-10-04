@@ -18,7 +18,7 @@ k8s/
     kustomization.yaml               # images(태그), replicas, 아래 생성 파일
     gen-config-repo-configmaps.sh    # modu_platform/config-repo → config-repo-configmaps.yaml (ConfigMap 3개)
     loadbalancers.yaml               # Mac 에서 들어오는 입구: 앱 6개 + 인프라 UI 8개(compose 와 같은 호스트 포트)
-    pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS)
+    pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS) — dev 는 2026-10-04 부터 꺼 둠(아래 "Pinpoint 켜기/끄기")
     secret.example.yaml              # Secret config-service 의 틀(값 비어 있음) — kustomization 에 없음
   create-infra-secret.sh             # infra.env + mongodb.key → Secret infra, mongo-keyfile, mysqld-exporter
   infra-secrets.example.env          # Secret infra 의 키 목록(값 비어 있음) — infra.env 로 복사해 채운다
@@ -31,7 +31,7 @@ dev 는 **전부 k8s 에서 돈다.** 처음(2026-10-03 오전)엔 앱 계층만
 
 - **입구**: Docker Desktop 의 k8s 는 NodePort 를 localhost 로 내보내지 않지만 **LoadBalancer Service 는 Mac 의 모든 인터페이스(*:포트)로 연다.** compose 가 쓰던 포트 그대로라 앱·콘솔·웹 주소가 안 바뀐다 — 게이트웨이 8000(안드로이드는 `192.168.0.3:8000`), 콘솔 8081/8084/8085, 커머스 웹 8082, config-service 8888(dev 도구용).
 - **로그**: `otel-collector` DaemonSet 이 `/var/log/pods/modu_*` 를 읽어 compose 와 같은 OpenSearch 인덱스 `modu-app-logs` 로 보낸다(`attributes.project: k8s`, `attributes.container`).
-- **Pinpoint**: JVM 13개에 에이전트(컬렉터와 같은 3.1.0, init 컨테이너가 jar 를 복사). 로그 MDC 옵션은 `-Dpinpoint.profiler.logback.logging.transactioninfo=true` 로 덮어써지지만 컬렉터 주소(`profiler.transport.grpc.collector.ip`, 기본 127.0.0.1)는 `-D` 로 안 바뀌어서 init 컨테이너가 설정 파일을 `pinpoint-collector` 로 고친다(`overlays/dev/pinpoint-agent-patch*.yaml`).
+- **Pinpoint**: **dev 에선 꺼 둔다(2026-10-04 결정 — APM 은 운영 환경에서만, dev 는 필요할 때 켠다; 메모리 상한 약 4.6GiB 를 Argo CD·GoCD 자리로).** 켜는 법은 아래 "Pinpoint 켜기/끄기". 켜면: JVM 13개에 에이전트(컬렉터와 같은 3.1.0, init 컨테이너가 jar 를 복사). 로그 MDC 옵션은 `-Dpinpoint.profiler.logback.logging.transactioninfo=true` 로 덮어써지지만 컬렉터 주소(`profiler.transport.grpc.collector.ip`, 기본 127.0.0.1)는 `-D` 로 안 바뀌어서 init 컨테이너가 설정 파일을 `pinpoint-collector` 로 고친다(`overlays/dev/pinpoint-agent-patch*.yaml`).
 - **롤아웃은 한 번에 하나씩.** 단일 노드·빠듯한 메모리에서 13개 Deployment 의 pod 템플릿을 한꺼번에 바꾸면(공통 패치 수정 + `apply -k`) maxSurge 1 때문에 JVM 이 26개가 되어 노드가 멈춘다(2026-10-03 실제로 API 서버가 응답 불능). 공통 변경은:
   ```bash
   J=(config-service gateway-service auth-service member-service chat-service chat-store-service ws-service push-service profile-service storage-service point-service schedule-service commerce-service)
@@ -219,6 +219,17 @@ compose 볼륨의 데이터 디렉터리를 **통째로** PVC 에 복사했다(�
 - **compose 쪽 컨테이너 IP 가 바뀌면** headless Endpoints 가 어긋나 앱이 멈춘 것처럼 보였다(이제 compose 가 없으니 해당 없음).
 - **13개 JVM 템플릿을 한꺼번에 바꾸지 말 것** — 위 "롤아웃은 한 번에 하나씩".
 
+## Pinpoint 켜기/끄기
+
+dev 는 꺼져 있다(스택 6개 replicas 0, JVM 에이전트 패치 주석). PVC(`pinpoint-hbase-data`, `pinpoint-mysql`)는 남아 있어 켜면 이전 데이터가 이어진다. 켜고 끄는 건 매니페스트 두 군데(`overlays/dev/kustomization.yaml`)다.
+
+1. `replicas:` 의 Pinpoint 6개(zoo1·pinpoint-hbase·pinpoint-mysql·pinpoint-redis·pinpoint-collector·pinpoint-web)를 `1`(끌 때 `0`)로.
+2. `patches:` 블록(에이전트 2개)의 주석을 푼다(끌 때 주석).
+3. **JVM 13개 템플릿이 한꺼번에 바뀌므로** 반드시 "롤아웃은 한 번에 하나씩" 절차로: 13개 `rollout pause` → `kubectl apply -k overlays/dev` → 하나씩 `rollout resume` + `rollout status`. 켤 때는 먼저 스택이 뜨길 기다린다(`pinpoint-hbase` Ready → collector·web Ready; HBase 가 3~5분 걸린다). 끌 때 순서는 반대여도 상관없다(에이전트는 컬렉터가 없어도 돌지만 종료가 20초 늦어진다).
+4. 켠 뒤 확인: `http://localhost:18080` 앱 목록에 13개, 끈 뒤 확인: `kubectl -n modu get deploy -o json | grep -c pinpoint-bootstrap` 가 0.
+
+2026-10-04 끄기 결과: 파드 19개 → 13개 JVM 재시작(한 번에 하나씩, 약 8분), Pinpoint 6개 종료. 로그 수집기의 Pinpoint 에이전트 잡음 필터(`otel-collector.yaml` `drop_noise`)는 그대로 둔다(켜도 조용하게).
+
 ## config-repo 바꿀 때
 
 ```bash
@@ -265,7 +276,7 @@ kubectl delete -k overlays/dev                              # 전부 내리기 �
 - **gh-ost 이미지** — `modu-gh-ost:1.1.11` 은 레지스트리에 없어 `data/mysql/gh-ost/build-and-import.sh` 로 노드의 containerd 에 넣는다(MinIO 이미지와 같은 방식). 노드를 다시 만들면 다시. 실제 클러스터에선 GHCR 에 올리고 `imagePullPolicy` 를 바꾼다.
 - **node-exporter·cadvisor** — 도커 호스트 지표라 옮기지 않았다. 컨테이너 지표는 Prometheus 가 kubelet cAdvisor 로 긁는다(라벨이 달라 Grafana `cadvisor` 대시보드는 `pod`/`container` 라벨로 고쳐야 한다). `node-exporter.json` 대시보드는 뺐다.
 - **앱 파드의 service link env** — 인프라 Service 가 ClusterIP 가 되면서 앱 파드에도 `MYSQL_MEMBER_PORT=tcp://…`, `KAFKA_PORT` 같은 env 가 수십 개 들어간다. 겹치는 이름은 지금 없지만 앱 Deployment 에도 `enableServiceLinks: false` 를 주는 것이 안전하다.
-- **Pinpoint 요청 추적** — 에이전트 13개가 컬렉터에 등록되고 앱 목록에 보이지만, 요청 처리 로그 줄에 `PtxId`/`PspanId` 가 아직 안 붙는다(기동 줄에는 붙음). 트랜잭션 샘플링/서블릿 플러그인 설정 확인 필요.
+- **Pinpoint 요청 추적** — (dev 에선 꺼 둠) 켰을 때 에이전트 13개가 컬렉터에 등록되고 앱 목록에 보이지만, 요청 처리 로그 줄에 `PtxId`/`PspanId` 가 아직 안 붙는다(기동 줄에는 붙음). 운영에 올리기 전에 트랜잭션 샘플링/서블릿 플러그인 설정 확인 필요.
 - **Prometheus 스크레이프** — 정적 대상(Service 이름)만. 파드가 2개 이상인 Deployment 는 Service 로 긁으면 매번 다른 파드가 응답한다 — 그때는 kubernetes_sd(role: endpoints/pod)로 바꿀 것.
 - **Ingress** — 안 쓴다. Docker Desktop 에선 LoadBalancer Service 로 충분. 실제 클러스터로 갈 때 Ingress(게이트웨이만 노출)로.
 - **runAsNonRoot** — 이미지에 USER 가 없어 false. Dockerfile 에 비 root 사용자 추가 후 true 로.
