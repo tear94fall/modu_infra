@@ -2,6 +2,7 @@
 # Secret(config-service·infra·mongo-keyfile·mysqld-exporter)은 Git 에 없고 Argo 추적 annotation 도 없어 Argo 가 건드리지 않는다(k8s/README.md).
 #
 # modu-dev          modu_infra main  k8s/overlays/dev  → 앱 + 인프라 전부(네임스페이스 modu). JVM Deployment 는 sync-wave 로 하나씩 롤아웃.
+# modu-ceph         modu_infra main  k8s/ceph          → Rook 오퍼레이터 + Ceph 클러스터 + RGW(네임스페이스 rook-ceph). CRD 는 server-side apply.
 # modu-config-repo  modu_platform develop  루트 kustomization → config-repo ConfigMap 3개(config-repo-root·messenger·commerce).
 #                   Sync 뒤 config-service 는 다시 띄워야 반영(kubectl -n modu rollout restart deploy/config-service).
 apiVersion: argoproj.io/v1alpha1
@@ -47,3 +48,28 @@ spec:
   syncPolicy:
     syncOptions:
       - ApplyOutOfSyncOnly=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: modu-ceph
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tear94fall/modu_infra.git
+    targetRevision: main
+    path: k8s/ceph
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rook-ceph
+  syncPolicy:
+    syncOptions:
+      - ApplyOutOfSyncOnly=true
+      - PruneLast=true
+  ignoreDifferences:
+    # Rook 이 런타임에 채우는 필드
+    - group: ceph.rook.io
+      kind: CephCluster
+      jsonPointers:
+        - /spec/storage/nodes
