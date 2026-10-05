@@ -8,6 +8,5 @@ resources:
   - redis-cluster.yaml
   - kafka.yaml
   - mongo.yaml
-  - minio.yaml
   - rgw.yaml
   - rabbitmq.yaml

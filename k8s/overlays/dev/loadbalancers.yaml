@@ -187,24 +187,6 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: minio-lb
-  labels:
-    app: minio
-spec:
-  type: LoadBalancer
-  selector:
-    app: minio
-  ports:
-  - name: api
-    port: 9000
-    targetPort: api
-  - name: console
-    port: 9001
-    targetPort: console
----
-apiVersion: v1
-kind: Service
-metadata:
   name: rabbitmq-lb
   labels:
     app: rabbitmq

@@ -1,6 +1,6 @@
 # k8s — modu 전체(앱 + 인프라) Kustomize 매니페스트
 
-modu 의 **앱 계층**(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3 = Deployment 17개)과 **인프라 전부**(MySQL×10, Redis, Redis 클러스터×6, ZooKeeper·Kafka·Debezium·Kafka UI, Mongo×3, MinIO, RabbitMQ, OpenSearch·Dashboards, Prometheus·Grafana·exporter 4개, Pinpoint)를 로컬 Docker Desktop Kubernetes(context `docker-desktop`, 1 노드, 네임스페이스 `modu` 하나)에 띄우는 매니페스트입니다.
+modu 의 **앱 계층**(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3 = Deployment 17개)과 **인프라 전부**(MySQL×10, Redis, Redis 클러스터×6, ZooKeeper·Kafka·Debezium·Kafka UI, Mongo×3, Ceph(RGW), RabbitMQ, OpenSearch·Dashboards, Prometheus·Grafana·exporter 4개, Pinpoint)를 로컬 Docker Desktop Kubernetes(context `docker-desktop`, 1 노드, 네임스페이스 `modu` 하나)에 띄우는 매니페스트입니다.
 인프라의 Service 이름·포트는 compose 컨테이너 이름·포트와 같다(`mysql-chat:3306`, `kafka:9092`, `redis-node-1:6379` …) — 그래서 앱 설정(config-repo, env)은 compose 때와 그대로다. 인프라는 2026-10-03 에 compose 에서 옮겼다(아래 [인프라도 k8s](#인프라도-k8s)).
 
 ```
@@ -11,7 +11,7 @@ k8s/
     messenger/  auth member chat chat-store ws push storage profile point schedule (-service.yaml)
     commerce/   commerce-service.yaml web.yaml
     admin/      modu-admin.yaml modu-system.yaml modu-internal.yaml
-    data/       mysql.yaml(10) redis.yaml redis-cluster.yaml(6 + init Job) kafka.yaml(zookeeper·kafka·debezium·kafka-ui) mongo.yaml(3) minio.yaml rabbitmq.yaml
+    data/       mysql.yaml(10) redis.yaml redis-cluster.yaml(6 + init Job) kafka.yaml(zookeeper·kafka·debezium·kafka-ui) mongo.yaml(3) rgw.yaml(ExternalName → ceph/) rabbitmq.yaml
     observability/  opensearch.yaml(+dashboards) otel-collector.yaml(파드 로그 DaemonSet) prometheus.yaml(+RBAC) grafana.yaml(+grafana/dashboards/*.json)
                     exporters.yaml(mysqld·redis·mongodb·kafka) pinpoint.yaml(hbase·mysql·redis·zoo1·collector·web)
   overlays/dev/
@@ -72,8 +72,8 @@ kubectl -n modu create secret generic config-service \
 cp infra-secrets.example.env infra.env && $EDITOR infra.env      # 처음 한 번: 23개 값 채우기(키마다 주석). mongodb.key 가 없으면 openssl rand -base64 756 > mongodb.key
 ./create-infra-secret.sh
 
-# 3) MinIO 이미지를 노드에 넣는다(imagePullPolicy: Never — 레지스트리가 막혀 있다)
-docker save quay.io/minio/minio:RELEASE.2024-02-14T21-36-02Z | docker exec -i desktop-control-plane ctr -n k8s.io images import -
+# 3) Ceph(RGW) — 아래 "Ceph" 절(두 번 apply, 5~10분)
+kubectl apply --server-side -k ceph; sleep 5; kubectl apply --server-side -k ceph
 
 # 4) 생성 파일
 overlays/dev/gen-config-repo-configmaps.sh   # ~/workspace/modu_platform/config-repo (CONFIG_REPO 로 바꿀 수 있다)
@@ -107,7 +107,7 @@ kubectl -n modu get pods -o wide
 | http://localhost:19090 | Prometheus (→ 9090) |
 | http://localhost:9009 | Kafka UI (→ 8080) |
 | http://localhost:18080 | Pinpoint Web (→ 8080) |
-| http://localhost:9000 / 9001 | MinIO API / 콘솔 |
+| http://localhost:7480 / 7001 | Ceph RGW(S3) / Ceph 대시보드 |
 | http://localhost:15672 | RabbitMQ 관리 화면 |
 
 개별 서비스 포트(9900, 8080 …)와 **MySQL·Mongo·Redis·Kafka** 는 바깥에 열지 않는다. 필요하면 port-forward:
@@ -136,7 +136,7 @@ Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커
 | debezium | Deploy | debezium/connect:2.5.0.Final | :8083 | — | 256Mi / 768Mi |
 | kafka-ui | Deploy | provectuslabs/kafka-ui:v0.7.2 | :8080 | — | 256Mi / 512Mi |
 | mongo-01..03 | STS ×3 | mongo:7.0.8 | :27017 | 2Gi | 256Mi / 768Mi |
-| minio | STS | quay.io/minio/minio:RELEASE.2024-02-14T21-36-02Z (pull Never) | :9000, :9001 | 2Gi | 128Mi / 512Mi |
+| (minio) | — | 2026-10-05 Ceph RGW 로 교체(k8s/ceph, 네임스페이스 rook-ceph) | | | |
 | rabbitmq | STS | rabbitmq:3.12.4-management | :5672, :15672, :25672, :15692 | 512Mi | 128Mi / 384Mi |
 | opensearch | STS | opensearchproject/opensearch:3.3.2 | :9200 | 5Gi | 1.5Gi / 1.5Gi |
 | opensearch-dashboards | Deploy | opensearchproject/opensearch-dashboards:3.3.0 | :5601 | — | 256Mi / 768Mi |
@@ -160,7 +160,6 @@ compose 와 다른 점(이유는 각 매니페스트 주석):
 - **redis 클러스터** — compose 의 고정 IP(10.90.0.11~16) 대신 노드마다 ClusterIP Service 를 두고 그 IP 를 `--cluster-announce-ip` 로 광고(파드가 재시작해도 nodes.conf 의 IP 가 맞는다). 클라이언트에는 호스트 이름 `redis-node-N` 을 광고. 클러스터 생성은 compose 의 redis-node-1 자체 부트스트랩 대신 Job `redis-cluster-init`(6노드 PONG → 슬롯 0 일 때만 create). **redis-node Service 를 지웠다 다시 만들면 ClusterIP 가 바뀌어 클러스터가 깨진다.**
 - **mongo** — keyFile 은 Secret `mongo-keyfile` 을 init 컨테이너가 emptyDir 로 복사해 `chown 999:999 && chmod 400`. replica set 최초 구성: `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh`(ConfigMap `mongo-rs-init`).
 - **rabbitmq** — 데이터가 노드 이름 `rabbit@rabbitmq` 에 묶여 있어(compose `hostname: rabbitmq`) `RABBITMQ_NODENAME=rabbit@rabbitmq` + `hostAliases`(rabbitmq → 127.0.0.1). StatefulSet 파드의 hostname 은 `rabbitmq-0` 으로 강제된다.
-- **minio** — `shm_size: 1gb` 는 옮기지 않았다. 데이터는 bind mount(`MINIO_DATA_DIR`) 대신 PVC.
 - **opensearch** — `ulimits memlock` 은 뺐다(memory_lock 을 안 켬). `vm.max_map_count` 는 노드 = Docker VM 커널 값 그대로(compose 의 opensearch 가 같은 커널에서 돌았다), sysctl init 컨테이너 없음.
 - **prometheus** — 잡·대상 이름은 compose 의 `prometheus.yml` 그대로(ConfigMap `prometheus` 에 인라인. 대상이 이제 k8s Service). `node` 잡은 뺐고 `cadvisor` 잡은 kubelet cAdvisor(API 서버 프록시 `/api/v1/nodes/<node>/proxy/metrics/cadvisor`, ClusterRole `modu-prometheus`)로 바꿨다. 설정 바꾼 뒤 `kubectl -n modu exec prometheus-0 -- wget -qO- --post-data= http://localhost:9090/-/reload`.
 - **grafana** — provisioning 을 projected 볼륨으로 compose 와 같은 디렉터리 모양으로. 대시보드 JSON 은 `base/observability/grafana/dashboards/`(이제 유일한 사본) → configMapGenerator 2개(client-side apply 의 last-applied 주석 256KiB 한도 때문에 나눔). `node-exporter.json`(468KB, 데이터도 없음)은 뺐다(git 이력에만 있다).
@@ -176,12 +175,12 @@ cd ~/workspace/modu_infra/k8s
 #    clusterIP 는 None → IP 로 바꿀 수 없다(apply 가 "RequireDualStack … not configured" 로 실패한다). 앱 파드는 잠시 인프라를 못 찾는다.
 for s in mysql-member mysql-member-replica mysql-chat mysql-chat-replica mysql-push mysql-push-replica mysql-profile mysql-profile-replica \
          mysql-commerce mysql-commerce-replica redis redis-node-1 redis-node-2 redis-node-3 redis-node-4 redis-node-5 redis-node-6 \
-         kafka zookeeper mongo-01 mongo-02 mongo-03 minio rabbitmq pinpoint-collector opensearch; do
+         kafka zookeeper mongo-01 mongo-02 mongo-03 rabbitmq pinpoint-collector opensearch; do
   kubectl -n modu delete service/$s endpoints/$s --ignore-not-found
 done
-# 2) Secret + MinIO 이미지(위 '처음 한 번' 2·3)
+# 2) Secret + Ceph(위 '처음 한 번' 2·3)
 ./create-infra-secret.sh
-docker save quay.io/minio/minio:RELEASE.2024-02-14T21-36-02Z | docker exec -i desktop-control-plane ctr -n k8s.io images import -
+kubectl apply --server-side -k ceph; sleep 5; kubectl apply --server-side -k ceph
 # 3) 적용 — Service 가 워크로드보다 먼저 만들어진다(redis-node 의 service link env 에 필요)
 kubectl apply -k overlays/dev
 kubectl -n modu get pods -l app.kubernetes.io/component=data -w
@@ -206,7 +205,7 @@ compose 볼륨의 데이터 디렉터리를 **통째로** PVC 에 복사했다(�
 | ZooKeeper(data+log)·Kafka | 볼륨 복사 | 토픽 8개·오프셋 유지 |
 | Redis·Redis 클러스터·RabbitMQ | 새로 시작 (캐시·세션 — 결정) | 클러스터는 `redis-cluster-init` Job 이 생성(16384 슬롯). 사용자는 한 번 다시 로그인 |
 | MongoDB ×3 | 볼륨 복사(uid 999) | PRIMARY + SECONDARY 2, `modu-chat.chat` 105건 그대로 |
-| MinIO | 호스트 디렉터리 복사(uid 1000) | 19MB |
+| MinIO | 호스트 디렉터리 복사(uid 1000) | 19MB | (2026-10-05 에 다시 Ceph RGW 로 옮김 — 아래 "Ceph")
 | MySQL 5쌍 | compose 정지 → 소스·레플리카 볼륨 복사(uid 999) → k8s 기동 | 쌍마다 행 수 일치, 레플리카 IO/SQL Yes(소스가 늦게 뜨면 60초 뒤 재시도로 붙는다), `super_read_only=1` |
 
 순서는 관측 → Kafka/Redis/RabbitMQ → Mongo/MinIO → MySQL. 앱은 그대로 둔 채 인프라 Service 를 compose용(headless+Endpoints)에서 k8s 것으로 바꿔 끼웠고, 해당 인프라를 쓰는 서비스만 한 번씩 재시작했다. Flip3 로 채팅 전송(k8s MySQL 소스·레플리카에 저장)·푸시 수신까지 확인.
@@ -246,13 +245,13 @@ kubectl -n rook-ceph get secret rook-ceph-object-user-modu-storage-service -o js
 | 구성 | 내용 |
 |---|---|
 | 디스크 | 노드엔 빈 블록 디바이스가 없어서 `loop-disk` DaemonSet(privileged)이 `/var/lib/modu-ceph/osd0.img`(10GiB sparse)를 `/dev/loop7` 로 붙인다. Docker Desktop 재시작 때 loop 는 사라지고 DaemonSet 이 다시 붙인다(파일은 남아 데이터 유지). operator 설정 `ROOK_CEPH_ALLOW_LOOP_DEVICES=true` |
-| 클러스터 | MON 1, MGR 1(대시보드 http://localhost:7000, admin / Secret `rook-ceph-dashboard-password`), OSD 1, 복제 없음(`osd_pool_default_size 1`, 풀 size 1). crash collector·log collector·exporter 끔, CSI 드라이버 끔(볼륨은 local-path 그대로) |
+| 클러스터 | MON 1, MGR 1(대시보드 http://localhost:7001(7000 은 macOS AirPlay 가 점유), admin / Secret `rook-ceph-dashboard-password`), OSD 1, 복제 없음(`osd_pool_default_size 1`, 풀 size 1). crash collector·log collector·exporter 끔, CSI 드라이버 끔(볼륨은 local-path 그대로) |
 | RGW | `CephObjectStore modu`(instances 1, 포트 80) → Service `rook-ceph-rgw-modu.rook-ceph.svc`. 앱은 modu 네임스페이스의 ExternalName Service **`rgw`**(`base/data/rgw.yaml`)로 본다 → storage-service `s3.endpoint: http://rgw:80`. Mac 에선 LB **7480** |
 | 사용자 | `CephObjectStoreUser storage-service` → Secret `rook-ceph-object-user-modu-storage-service`(AccessKey·SecretKey). 값은 config-repo `storage-service.yml` 의 `s3.accessKey/secretKey` 에 `{cipher}` 로 |
 | 메모리 | limits 합 ≈ 3.5GiB(mon 512Mi, mgr 512Mi, osd 1.5Gi — 1.2GiB 미만이면 osd_memory_target 하한(896MB) 때문에 기동 assert, rgw 512Mi, operator 256Mi, csi 컨트롤러 소량, prepare 512Mi 일시) |
 
 - **밟은 것(2026-10-05 설치 때)**: ① Rook 1.20 은 CSI 를 안 써도 `csi-operator.yaml`(csi.ceph.io CRD `CephConnection` + 컨트롤러)이 있어야 클러스터를 만든다. CSI 드라이버는 operator.yaml 안의 `Driver` CR 2개를 kustomize 로 지워서 끈다(옛 `ROOK_CSI_ENABLE_*` 키는 무시됨; rbd 노드플러그인은 Docker Desktop 커널에서 CrashLoop). ② 예제의 `security.cephx.csi.keyType: aes` 는 Ceph v20 이 거부(`get-or-create-key … exit status 22`) — 빼면 기본값으로 된다. ③ `cephConfig.global.osd_memory_target` 은 설정 실패 — Rook 이 OSD limit 에서 계산하므로 적지 않는다. ④ 노드에 udevd 가 없어 ceph-volume 이 `No udev data could be retrieved for /sys/block/…` 로 모든 디바이스를 건너뛴다 — `loop-disk` DaemonSet 이 `/run/udev/data/b<maj>:<min>` 을 모든 블록 디바이스·파티션(nbd·vda1 포함)에 대해 써 준다. ⑤ OSD limit 1Gi 면 `osd_memory_target`(limit×0.8) 이 하한 896MB 미만이라 ceph-osd 가 assert 로 죽는다 → 1.5Gi. ⑥ OSD prepare 를 다시 돌리려면 prepare Job 을 지우고 operator 를 재시작한다(annotation 으론 안 움직임).
-- **데이터 이전(2026-10-05)**: `k8s/ceph/copy-from-minio.sh` — rclone 일회성 파드로 MinIO `file-storage` → RGW 같은 버킷(메타데이터 포함). 결과: 51개 객체 18.6MiB, 양쪽 크기 일치.
+- **데이터 이전(2026-10-05)**: rclone 일회성 파드(`kubectl run … --image=rclone/rclone --command -- sh -c 'rclone copy --metadata src:file-storage dst:file-storage'`, S3 provider Minio→Ceph)로 MinIO `file-storage` → RGW 같은 버킷(메타데이터 포함). 결과: 51개 객체 18.6MiB, 양쪽 크기 일치. 뒤에 MinIO(StatefulSet·Service·LB·PVC·Secret 키·노드에 import 한 이미지)는 지웠다. 옮기기 전 백업: `~/modu-data/backup/2026-10-03-k8s/minio`.
 - **운영에선** loop 파일 대신 노드 디스크(`storage.devices`), MON 3·size 3, `priorityClassNames` 그대로. 매니페스트에서 바뀌는 건 그 줄들뿐이다.
 - Argo 는 CRD 를 server-side 로 적용한다(cephclusters CRD 가 300KB 라 client-side 한도 초과) — CRD 에 `argocd.argoproj.io/sync-options: ServerSideApply=true`. `CephCluster.spec.storage.nodes` 는 Rook 이 채우므로 비교 제외.
 
@@ -333,6 +332,6 @@ kubectl delete -k overlays/dev                              # 전부 내리기 �
 - **Prometheus 스크레이프** — 정적 대상(Service 이름)만. 파드가 2개 이상인 Deployment 는 Service 로 긁으면 매번 다른 파드가 응답한다 — 그때는 kubernetes_sd(role: endpoints/pod)로 바꿀 것.
 - **Ingress** — 안 쓴다. Docker Desktop 에선 LoadBalancer Service 로 충분. 실제 클러스터로 갈 때 Ingress(게이트웨이만 노출)로.
 - **runAsNonRoot** — 이미지에 USER 가 없어 false. Dockerfile 에 비 root 사용자 추가 후 true 로.
-- **storage-service `/data`** — compose 는 bind mount, k8s 는 emptyDir(multipart 임시 파일이라 유실돼도 된다; 실제 파일은 MinIO).
+- **storage-service `/data`** — compose 는 bind mount, k8s 는 emptyDir(multipart 임시 파일이라 유실돼도 된다; 실제 파일은 Ceph RGW).
 - **config-service·gateway replicas** — dev 는 메모리 때문에 1. 실제 클러스터에선 2 이상.
 - **백업** — PVC 는 local-path(노드 디스크, reclaim Delete). 주기적 `mysqldump`/`mongodump` 를 CronJob 으로 두는 것이 다음 할 일. 옮기기 직전 백업은 `~/modu-data/backup/2026-10-03-k8s/`.

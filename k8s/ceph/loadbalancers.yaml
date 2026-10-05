@@ -1,4 +1,4 @@
-# Mac 에서 들어오는 입구(dev). RGW(S3) 7480 — 운영 스크립트·rclone 용. Ceph 대시보드 7000(admin, 비밀번호는 Secret rook-ceph-dashboard-password).
+# Mac 에서 들어오는 입구(dev). RGW(S3) 7480 — 운영 스크립트·rclone 용. Ceph 대시보드 7001(admin, 비밀번호는 Secret rook-ceph-dashboard-password). 7000 은 macOS AirPlay 수신기가 쓴다(LB 가 pending).
 apiVersion: v1
 kind: Service
 metadata:
@@ -30,5 +30,5 @@ spec:
     mgr_role: active
   ports:
     - name: http-dashboard
-      port: 7000
+      port: 7001
       targetPort: 7000
