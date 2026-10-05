@@ -1,0 +1,49 @@
+# Argo CD Application 2개. 둘 다 수동 Sync(자동 동기화 없음 — "내가 원할 때 배포"), prune 없음(Git 에서 지운 객체는 UI 에서 확인 후 수동 prune).
+# Secret(config-service·infra·mongo-keyfile·mysqld-exporter)은 Git 에 없고 Argo 추적 annotation 도 없어 Argo 가 건드리지 않는다(k8s/README.md).
+#
+# modu-dev          modu_infra main  k8s/overlays/dev  → 앱 + 인프라 전부(네임스페이스 modu). JVM Deployment 는 sync-wave 로 하나씩 롤아웃.
+# modu-config-repo  modu_platform develop  루트 kustomization → config-repo ConfigMap 3개(config-repo-root·messenger·commerce).
+#                   Sync 뒤 config-service 는 다시 띄워야 반영(kubectl -n modu rollout restart deploy/config-service).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: modu-dev
+  namespace: argocd
+  # Application 을 지워도 modu 의 객체는 남긴다(finalizer 없음).
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tear94fall/modu_infra.git
+    targetRevision: main
+    path: k8s/overlays/dev
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: modu
+  syncPolicy:
+    syncOptions:
+      - ApplyOutOfSyncOnly=true   # 바뀐 객체만 apply(wave 와 함께 롤아웃 범위를 줄인다)
+      - PruneLast=true
+  ignoreDifferences:
+    # 완료된 Job 은 spec 이 불변이라 비교에서 뺀다(redis-cluster-init).
+    - group: batch
+      kind: Job
+      jsonPointers:
+        - /spec
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: modu-config-repo
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tear94fall/modu_platform.git
+    targetRevision: develop
+    path: .
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: modu
+  syncPolicy:
+    syncOptions:
+      - ApplyOutOfSyncOnly=true

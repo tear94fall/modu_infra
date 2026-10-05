@@ -16,9 +16,9 @@ k8s/
                     exporters.yaml(mysqld·redis·mongodb·kafka) pinpoint.yaml(hbase·mysql·redis·zoo1·collector·web)
   overlays/dev/
     kustomization.yaml               # images(태그), replicas, 아래 생성 파일
-    gen-config-repo-configmaps.sh    # modu_platform/config-repo → config-repo-configmaps.yaml (ConfigMap 3개)
     loadbalancers.yaml               # Mac 에서 들어오는 입구: 앱 6개 + 인프라 UI 8개(compose 와 같은 호스트 포트)
     pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS) — dev 는 2026-10-04 부터 꺼 둠(아래 "Pinpoint 켜기/끄기")
+  cicd/argocd/                       # Argo CD(v3.5.3) 설치 + Application 2개(modu-dev, modu-config-repo) — 아래 "Argo CD 로 배포"
     secret.example.yaml              # Secret config-service 의 틀(값 비어 있음) — kustomization 에 없음
   create-infra-secret.sh             # infra.env + mongodb.key → Secret infra, mongo-keyfile, mysqld-exporter
   infra-secrets.example.env          # Secret infra 의 키 목록(값 비어 있음) — infra.env 로 복사해 채운다
@@ -32,7 +32,7 @@ dev 는 **전부 k8s 에서 돈다.** 처음(2026-10-03 오전)엔 앱 계층만
 - **입구**: Docker Desktop 의 k8s 는 NodePort 를 localhost 로 내보내지 않지만 **LoadBalancer Service 는 Mac 의 모든 인터페이스(*:포트)로 연다.** compose 가 쓰던 포트 그대로라 앱·콘솔·웹 주소가 안 바뀐다 — 게이트웨이 8000(안드로이드는 `192.168.0.3:8000`), 콘솔 8081/8084/8085, 커머스 웹 8082, config-service 8888(dev 도구용).
 - **로그**: `otel-collector` DaemonSet 이 `/var/log/pods/modu_*` 를 읽어 compose 와 같은 OpenSearch 인덱스 `modu-app-logs` 로 보낸다(`attributes.project: k8s`, `attributes.container`).
 - **Pinpoint**: **dev 에선 꺼 둔다(2026-10-04 결정 — APM 은 운영 환경에서만, dev 는 필요할 때 켠다; 메모리 상한 약 4.6GiB 를 Argo CD·GoCD 자리로).** 켜는 법은 아래 "Pinpoint 켜기/끄기". 켜면: JVM 13개에 에이전트(컬렉터와 같은 3.1.0, init 컨테이너가 jar 를 복사). 로그 MDC 옵션은 `-Dpinpoint.profiler.logback.logging.transactioninfo=true` 로 덮어써지지만 컬렉터 주소(`profiler.transport.grpc.collector.ip`, 기본 127.0.0.1)는 `-D` 로 안 바뀌어서 init 컨테이너가 설정 파일을 `pinpoint-collector` 로 고친다(`overlays/dev/pinpoint-agent-patch*.yaml`).
-- **롤아웃은 한 번에 하나씩.** 단일 노드·빠듯한 메모리에서 13개 Deployment 의 pod 템플릿을 한꺼번에 바꾸면(공통 패치 수정 + `apply -k`) maxSurge 1 때문에 JVM 이 26개가 되어 노드가 멈춘다(2026-10-03 실제로 API 서버가 응답 불능). 공통 변경은:
+- **롤아웃은 한 번에 하나씩.** (Argo CD 로 Sync 하면 JVM Deployment 의 `sync-wave` 1~13 이 이 순서를 자동으로 지킨다 — 아래 "Argo CD 로 배포". 손으로 `kubectl apply -k` 할 때만 아래 절차.) 단일 노드·빠듯한 메모리에서 13개 Deployment 의 pod 템플릿을 한꺼번에 바꾸면(공통 패치 수정 + `apply -k`) maxSurge 1 때문에 JVM 이 26개가 되어 노드가 멈춘다(2026-10-03 실제로 API 서버가 응답 불능). 공통 변경은:
   ```bash
   J=(config-service gateway-service auth-service member-service chat-service chat-store-service ws-service push-service profile-service storage-service point-service schedule-service commerce-service)
   kubectl -n modu rollout pause deploy "${J[@]}"      # zsh 는 $J 를 단어로 안 나눈다 — 배열로
@@ -218,6 +218,7 @@ compose 볼륨의 데이터 디렉터리를 **통째로** PVC 에 복사했다(�
 - **Pinpoint 에이전트 컬렉터 주소**: `-D` 로는 안 바뀐다 — init 컨테이너에서 설정 파일을 고친다.
 - **compose 쪽 컨테이너 IP 가 바뀌면** headless Endpoints 가 어긋나 앱이 멈춘 것처럼 보였다(이제 compose 가 없으니 해당 없음).
 - **13개 JVM 템플릿을 한꺼번에 바꾸지 말 것** — 위 "롤아웃은 한 번에 하나씩".
+- **NetworkPolicy 는 쓰지 말 것(Docker Desktop)**: kindnet 이 NetworkPolicy 를 nftables queue 로 강제하는데(`nft list table inet kindnet-network-policies`) verdict 가 `netlink send: i/o timeout` 으로 실패하면 **정책에 걸린 파드로 가는 파드→파드 패킷이 전부 버려진다**(노드→NodePort 만 됨). 2026-10-04 Argo CD 설치 직후 UI 8090 이 먹통이 된 원인 — 공식 매니페스트의 NetworkPolicy 7개를 `cicd/argocd/kustomization.yaml` 에서 지운다. 증상이 또 나오면 `kubectl get networkpolicy -A` 로 정책이 있는지부터 본다.
 
 ## Pinpoint 켜기/끄기
 
@@ -230,11 +231,38 @@ dev 는 꺼져 있다(스택 6개 replicas 0, JVM 에이전트 패치 주석). P
 
 2026-10-04 끄기 결과: 파드 19개 → 13개 JVM 재시작(한 번에 하나씩, 약 8분), Pinpoint 6개 종료. 로그 수집기의 Pinpoint 에이전트 잡음 필터(`otel-collector.yaml` `drop_noise`)는 그대로 둔다(켜도 조용하게).
 
-## config-repo 바꿀 때
+## Argo CD 로 배포 (2026-10-04 부터)
+
+dev 의 배포 주체는 **Argo CD**(`k8s/cicd/argocd`, 네임스페이스 `argocd`, v3.5.3)다. Git 이 진실이고 Argo 가 그걸 클러스터에 맞춘다. 모두의 시스템의 "배포 버튼"은 이 위에 얹는다(태그 커밋 + Sync 호출 — 후속).
 
 ```bash
-overlays/dev/gen-config-repo-configmaps.sh
-kubectl apply -k overlays/dev
+kubectl apply --server-side -k k8s/cicd/argocd          # 처음 한 번(CRD 가 커서 server-side). Application 이 CRD 보다 먼저라 두 번 돌린다.
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d   # UI http://localhost:8090, 사용자 admin
+```
+
+| Application | 소스 | 대상 | 내용 |
+|---|---|---|---|
+| `modu-dev` | modu_infra `main` `k8s/overlays/dev` | `modu` | 앱 17 + 인프라 전부(객체 144개) |
+| `modu-config-repo` | modu_platform `develop` 루트 `kustomization.yaml` | `modu` | config-repo ConfigMap 3개 |
+
+- **수동 Sync(버튼)**. 머지해도 자동으로 적용되지 않는다 — UI 의 Sync 또는 API(`POST /api/v1/applications/<app>/sync`). Argo 의 self-heal(손으로 바꾼 걸 Git 으로 되돌림)은 자동 동기화의 하위 옵션이라 수동 모드엔 없다. `kubectl` 로 바꾸면 UI 에 OutOfSync 로 보인다.
+- **prune 없음**. Git 에서 지운 객체는 자동으로 안 지운다(UI 에서 확인 후 Sync 창의 Prune 체크).
+- **sync-wave**: JVM Deployment 13개는 base 의 annotation `argocd.argoproj.io/sync-wave` 1(config)…13(commerce). Argo 는 앞 wave 가 Healthy 가 돼야 다음을 적용하므로 공통 패치를 바꿔도 한 번에 하나씩 롤아웃된다(JVM 26개 OOM 사고 재발 방지). 인프라·nginx 는 0(기본, 가장 먼저).
+- **Argo 가 안 건드리는 것**: Secret 4개(`config-service`·`infra`·`mongo-keyfile`·`mysqld-exporter` — Git 에 없음, `create-infra-secret.sh`), Argo 자신. 추적은 annotation `argocd.argoproj.io/tracking-id`(라벨 방식 아님).
+- **ApplyOutOfSyncOnly**: 바뀐 객체만 apply. 완료된 Job(`redis-cluster-init`)은 `spec` 비교 제외.
+- 뺀 컴포넌트: dex(SSO)·notifications·applicationset 은 replicas 0. 메모리 limits 합 ≈ 1.1GiB(Pinpoint 를 끄며 비운 자리).
+
+**배포 절차(지금)**: CI 가 올린 태그를 `overlays/dev/kustomization.yaml` 의 `images[].newTag`(`develop-<sha7>`)에 적어 PR → main 머지 → Argo UI 에서 `modu-dev` Sync(또는 Refresh 뒤 바뀐 Deployment 만 선택 Sync). 롤백은 Git revert → Sync, 또는 UI History 에서 이전 커밋으로 Sync.
+
+2026-10-04 도입 때: 기존 객체 144개를 그대로 "입양"(첫 Sync 는 tracking annotation 과 sync-wave annotation 만 추가, 파드 재시작 0). 도입 PR 머지 전까지 두 Application 의 `targetRevision` 을 feature 브랜치로 바꿔 두었다가(main 에는 아직 `config-repo-configmaps.yaml` 참조가 있어 빌드가 안 됨) 머지 후 매니페스트대로(`main`/`develop`) 되돌린다.
+
+## config-repo 바꿀 때
+
+config-repo 의 ConfigMap 3개(`config-repo-root`·`-messenger`·`-commerce`)는 2026-10-04 부터 이 저장소가 아니라 **modu_platform 루트의 `kustomization.yaml`**(configMapGenerator, 해시 접미사 없음)이 만들고, Argo CD Application `modu-config-repo` 가 적용한다(아래 "Argo CD 로 배포"). dev 오버레이에는 없다.
+
+```bash
+# modu_platform 에서 config-repo 를 고치고(새 파일이면 kustomization.yaml files 에도 추가 — ./k8s-check.sh 가 잡는다) develop 에 머지
+# → Argo UI(http://localhost:8090) 에서 modu-config-repo Sync   (Argo 없이: kubectl apply -k ~/workspace/modu_platform)
 kubectl -n modu rollout restart deploy/config-service
 # 설정을 받아 가는 서비스도 다시 띄워야 반영된다(Spring Cloud Bus /busrefresh 연동은 후속)
 kubectl -n modu rollout restart deploy/<svc>
