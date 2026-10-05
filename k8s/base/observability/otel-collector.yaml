@@ -49,7 +49,7 @@ data:
             type: add
             field: attributes.project
             value: k8s-infra
-            if: 'attributes.pod matches "^(mysql-|redis-|zookeeper-|kafka-|debezium-|mongo-|minio-|rabbitmq-|opensearch-|prometheus-|grafana-|[a-z]+-exporter-|pinpoint-|zoo1-|otel-collector-)"'
+            if: 'attributes.pod matches "^(mysql-|redis-|zookeeper-|kafka-|debezium-|mongo-|rabbitmq-|opensearch-|prometheus-|grafana-|[a-z]+-exporter-|pinpoint-|zoo1-|otel-collector-)"'
           # 가치 없는 줄은 버린다: 헬스체크 접근 로그(kube-probe), Pinpoint 에이전트 자체 로그(JSON 아님), JVM 옵션 안내, Mongo 연결 수락/종료(22943·22944)
           - id: drop_noise
             type: filter

@@ -1,4 +1,4 @@
-# modu 의 공통 매니페스트: 앱 계층(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3) + 인프라(data/ = MySQL·Redis·Kafka·Mongo·MinIO·RabbitMQ,
+# modu 의 공통 매니페스트: 앱 계층(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3) + 인프라(data/ = MySQL·Redis·Kafka·Mongo·RabbitMQ(+ rgw ExternalName → k8s/ceph),
 # observability/ = OpenSearch·Prometheus·Grafana·exporter·Pinpoint·파드 로그 수집). 2026-10-03 부터 인프라도 k8s 안에 있다(compose 에서 옮김) —
 # Service 이름·포트가 compose 컨테이너 이름·포트와 같아서 앱 설정은 그대로다.
 # 이미지 태그는 base 가 develop, 오버레이가 images: 로 고정한다. 환경별 값(LoadBalancer 입구, 복제 수, config-repo ConfigMap)은 오버레이에.

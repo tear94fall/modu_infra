@@ -31,11 +31,11 @@ kubectl -n modu create secret generic config-service --from-literal=ENCRYPT_KEY=
 cp infra-secrets.example.env infra.env && $EDITOR infra.env   # 값 채우기(처음 한 번). mongodb.key 도 옆에(없으면 openssl rand -base64 756 > mongodb.key)
 ./create-infra-secret.sh                      # k8s/infra.env + k8s/mongodb.key → Secret infra·mongo-keyfile·mysqld-exporter
 overlays/dev/gen-config-repo-configmaps.sh    # modu_platform/config-repo → ConfigMap
-docker save quay.io/minio/minio:RELEASE.2024-02-14T21-36-02Z | docker exec -i desktop-control-plane ctr -n k8s.io images import -   # MinIO 이미지는 공개 저장소에서 더 못 받는다
+kubectl apply --server-side -k ceph && kubectl apply --server-side -k ceph    # Ceph(RGW = S3) — CRD 뒤에 CephCluster, 두 번
 kubectl apply -k overlays/dev
 ```
 
-Mac 에서 들어가는 포트(LoadBalancer): 게이트웨이 8000 · 콘솔 8081/8084/8085 · 커머스 웹 8082 · config 8888 · OpenSearch Dashboards 5601 · Grafana 3000 · Prometheus 19090 · Pinpoint 18080 · kafka-ui 9009 · MinIO 9000/9001 · RabbitMQ 15672. DB·Kafka·Redis 는 밖에 열지 않는다(`kubectl port-forward`, 또는 아래 운영 스크립트처럼 `kubectl exec`).
+Mac 에서 들어가는 포트(LoadBalancer): 게이트웨이 8000 · 콘솔 8081/8084/8085 · 커머스 웹 8082 · config 8888 · OpenSearch Dashboards 5601 · Grafana 3000 · Prometheus 19090 · Pinpoint 18080 · kafka-ui 9009 · Ceph RGW 7480 · Ceph 대시보드 7001 · RabbitMQ 15672. DB·Kafka·Redis 는 밖에 열지 않는다(`kubectl port-forward`, 또는 아래 운영 스크립트처럼 `kubectl exec`).
 
 ## 로그
 

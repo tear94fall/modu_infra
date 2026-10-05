@@ -41,8 +41,6 @@ spec:
         env:
         - name: CONFIG_SERVER_URI
           value: "http://config-service:8888"
-        - name: MINIO_ENDPOINT
-          value: "http://minio:9000"
         - name: JAVA_TOOL_OPTIONS
           value: "-Dprofiler.logback.logging.transactioninfo=true"
         volumeMounts:
