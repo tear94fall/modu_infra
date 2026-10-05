@@ -31,7 +31,7 @@ images:
   - name: ghcr.io/tear94fall/modu-chat/push-service
     newTag: develop
   - name: ghcr.io/tear94fall/modu-chat/storage-service
-    newTag: develop
+    newTag: develop-5708871  # AWS SDK v2 + Ceph RGW (modu_chat #423). 움직이는 태그(develop)는 노드의 옛 MinIO 이미지가 쓰인다 — 항상 커밋 태그로
   - name: ghcr.io/tear94fall/modu-chat/profile-service
     newTag: develop
   - name: ghcr.io/tear94fall/modu-chat/point-service
