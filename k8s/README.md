@@ -18,7 +18,8 @@ k8s/
     kustomization.yaml               # images(태그), replicas, 아래 생성 파일
     loadbalancers.yaml               # Mac 에서 들어오는 입구: 앱 6개 + 인프라 UI 8개(compose 와 같은 호스트 포트)
     pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS) — dev 는 2026-10-04 부터 꺼 둠(아래 "Pinpoint 켜기/끄기")
-  cicd/argocd/                       # Argo CD(v3.5.3) 설치 + Application 2개(modu-dev, modu-config-repo) — 아래 "Argo CD 로 배포"
+  cicd/argocd/                       # Argo CD(v3.5.3) 설치 + Application 3개(modu-dev, modu-config-repo, modu-ceph) — 아래 "Argo CD 로 배포"
+  ceph/                              # Rook-Ceph(RGW = S3, MinIO 대체) — 아래 "Ceph"
     secret.example.yaml              # Secret config-service 의 틀(값 비어 있음) — kustomization 에 없음
   create-infra-secret.sh             # infra.env + mongodb.key → Secret infra, mongo-keyfile, mysqld-exporter
   infra-secrets.example.env          # Secret infra 의 키 목록(값 비어 있음) — infra.env 로 복사해 채운다
@@ -230,6 +231,30 @@ dev 는 꺼져 있다(스택 6개 replicas 0, JVM 에이전트 패치 주석). P
 4. 켠 뒤 확인: `http://localhost:18080` 앱 목록에 13개, 끈 뒤 확인: `kubectl -n modu get deploy -o json | grep -c pinpoint-bootstrap` 가 0.
 
 2026-10-04 끄기 결과: 파드 19개 → 13개 JVM 재시작(한 번에 하나씩, 약 8분), Pinpoint 6개 종료. 로그 수집기의 Pinpoint 에이전트 잡음 필터(`otel-collector.yaml` `drop_noise`)는 그대로 둔다(켜도 조용하게).
+
+## Ceph (S3 오브젝트 스토리지, 2026-10-05 부터 — MinIO 대체)
+
+MinIO 는 공식 이미지·바이너리 배포가 막혀(노드에 수동 import 해 쓰던 상태) **Rook-Ceph** 의 RGW(S3 게이트웨이)로 바꿨다. 매니페스트는 `k8s/ceph/`(네임스페이스 `rook-ceph`, Rook v1.20.8, Ceph v20.2.4), Argo Application `modu-ceph`.
+
+```bash
+kubectl apply --server-side -k k8s/ceph        # 처음 한 번(CRD 가 커서 server-side; CRD 뒤에 CephCluster 가 들어가므로 두 번 돌린다)
+kubectl -n rook-ceph get cephcluster modu      # PHASE Ready, HEALTH HEALTH_OK (처음엔 이미지 2개(≈2GB) 받느라 5~10분)
+kubectl -n rook-ceph get cephobjectstore modu  # PHASE Ready → RGW
+kubectl -n rook-ceph get secret rook-ceph-object-user-modu-storage-service -o jsonpath='{.data.AccessKey}' | base64 -d   # storage-service 키(SecretKey 도)
+```
+
+| 구성 | 내용 |
+|---|---|
+| 디스크 | 노드엔 빈 블록 디바이스가 없어서 `loop-disk` DaemonSet(privileged)이 `/var/lib/modu-ceph/osd0.img`(10GiB sparse)를 `/dev/loop7` 로 붙인다. Docker Desktop 재시작 때 loop 는 사라지고 DaemonSet 이 다시 붙인다(파일은 남아 데이터 유지). operator 설정 `ROOK_CEPH_ALLOW_LOOP_DEVICES=true` |
+| 클러스터 | MON 1, MGR 1(대시보드 http://localhost:7000, admin / Secret `rook-ceph-dashboard-password`), OSD 1, 복제 없음(`osd_pool_default_size 1`, 풀 size 1). crash collector·log collector·exporter 끔, CSI 드라이버 끔(볼륨은 local-path 그대로) |
+| RGW | `CephObjectStore modu`(instances 1, 포트 80) → Service `rook-ceph-rgw-modu.rook-ceph.svc`. 앱은 modu 네임스페이스의 ExternalName Service **`rgw`**(`base/data/rgw.yaml`)로 본다 → storage-service `s3.endpoint: http://rgw:80`. Mac 에선 LB **7480** |
+| 사용자 | `CephObjectStoreUser storage-service` → Secret `rook-ceph-object-user-modu-storage-service`(AccessKey·SecretKey). 값은 config-repo `storage-service.yml` 의 `s3.accessKey/secretKey` 에 `{cipher}` 로 |
+| 메모리 | limits 합 ≈ 3.5GiB(mon 512Mi, mgr 512Mi, osd 1.5Gi — 1.2GiB 미만이면 osd_memory_target 하한(896MB) 때문에 기동 assert, rgw 512Mi, operator 256Mi, csi 컨트롤러 소량, prepare 512Mi 일시) |
+
+- **밟은 것(2026-10-05 설치 때)**: ① Rook 1.20 은 CSI 를 안 써도 `csi-operator.yaml`(csi.ceph.io CRD `CephConnection` + 컨트롤러)이 있어야 클러스터를 만든다. CSI 드라이버는 operator.yaml 안의 `Driver` CR 2개를 kustomize 로 지워서 끈다(옛 `ROOK_CSI_ENABLE_*` 키는 무시됨; rbd 노드플러그인은 Docker Desktop 커널에서 CrashLoop). ② 예제의 `security.cephx.csi.keyType: aes` 는 Ceph v20 이 거부(`get-or-create-key … exit status 22`) — 빼면 기본값으로 된다. ③ `cephConfig.global.osd_memory_target` 은 설정 실패 — Rook 이 OSD limit 에서 계산하므로 적지 않는다. ④ 노드에 udevd 가 없어 ceph-volume 이 `No udev data could be retrieved for /sys/block/…` 로 모든 디바이스를 건너뛴다 — `loop-disk` DaemonSet 이 `/run/udev/data/b<maj>:<min>` 을 모든 블록 디바이스·파티션(nbd·vda1 포함)에 대해 써 준다. ⑤ OSD limit 1Gi 면 `osd_memory_target`(limit×0.8) 이 하한 896MB 미만이라 ceph-osd 가 assert 로 죽는다 → 1.5Gi. ⑥ OSD prepare 를 다시 돌리려면 prepare Job 을 지우고 operator 를 재시작한다(annotation 으론 안 움직임).
+- **데이터 이전(2026-10-05)**: `k8s/ceph/copy-from-minio.sh` — rclone 일회성 파드로 MinIO `file-storage` → RGW 같은 버킷(메타데이터 포함). 결과: 51개 객체 18.6MiB, 양쪽 크기 일치.
+- **운영에선** loop 파일 대신 노드 디스크(`storage.devices`), MON 3·size 3, `priorityClassNames` 그대로. 매니페스트에서 바뀌는 건 그 줄들뿐이다.
+- Argo 는 CRD 를 server-side 로 적용한다(cephclusters CRD 가 300KB 라 client-side 한도 초과) — CRD 에 `argocd.argoproj.io/sync-options: ServerSideApply=true`. `CephCluster.spec.storage.nodes` 는 Rook 이 채우므로 비교 제외.
 
 ## Argo CD 로 배포 (2026-10-04 부터)
 

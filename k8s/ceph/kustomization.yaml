@@ -1,0 +1,51 @@
+# Ceph(Rook v1.20.8) — dev 의 S3 오브젝트 스토리지(MinIO 대체, 2026-10-05). 네임스페이스 rook-ceph(Rook 관례; 공식 common.yaml 이 만든다).
+#   설치: kubectl apply --server-side -k k8s/ceph   (CRD 가 커서 server-side. CRD 가 먼저 떠야 CephCluster 가 받아들여지므로 두 번 돌린다)
+#   Argo CD: Application modu-ceph (k8s/cicd/argocd/applications.yaml) — CRD 는 annotation 으로 ServerSideApply.
+# 구성(1 노드 dev): MON 1, MGR 1(대시보드 http 7000), OSD 1(loop 디바이스 /dev/loop7 ← /var/lib/modu-ceph/osd0.img 10GiB, loop-disk.yaml),
+#   CephObjectStore modu(RGW 1, 풀 size 1), CephObjectStoreUser storage-service(키는 Secret rook-ceph-object-user-modu-storage-service 에 자동 생성).
+#   CSI(RBD·CephFS 볼륨 드라이버)는 쓰지 않아 끈다. 복제 없음(size 1) — dev 라서. 운영에선 노드 디스크·size 3·MON 3.
+# 앱이 보는 이름: modu 네임스페이스의 ExternalName Service `rgw`(base/data/rgw.yaml) → rook-ceph-rgw-modu.rook-ceph.svc:80.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - https://raw.githubusercontent.com/rook/rook/v1.20.8/deploy/examples/crds.yaml
+  - https://raw.githubusercontent.com/rook/rook/v1.20.8/deploy/examples/common.yaml
+  - https://raw.githubusercontent.com/rook/rook/v1.20.8/deploy/examples/csi-operator.yaml   # Rook 1.20 은 CSI 드라이버를 꺼도 csi.ceph.io CRD(CephConnection)·csi 컨트롤러가 있어야 클러스터를 만든다
+  - https://raw.githubusercontent.com/rook/rook/v1.20.8/deploy/examples/operator.yaml
+  - loop-disk.yaml
+  - cluster.yaml
+  - objectstore.yaml
+  - loadbalancers.yaml
+
+patches:
+  # CRD 중 cephclusters 가 300KB 를 넘어 client-side apply(annotation 256KB 한도)가 안 된다 — Argo 가 server-side 로 적용하게.
+  - target: {kind: CustomResourceDefinition}
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value:
+          argocd.argoproj.io/sync-options: ServerSideApply=true,Replace=false
+  # operator 설정: loop 디바이스 허용.
+  - patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: rook-ceph-operator-config
+        namespace: rook-ceph
+      data:
+        ROOK_CEPH_ALLOW_LOOP_DEVICES: "true"
+  # CSI 드라이버(RBD·CephFS 볼륨)는 안 쓴다 — operator.yaml 에 든 Driver CR 2개를 뺀다(ceph-csi-operator 컨트롤러만 남는다; CephConnection 때문에 필요).
+  # Rook 1.20 은 옛 ROOK_CSI_ENABLE_* 키를 안 보고 이 Driver CR 로 드라이버를 띄운다. rbd 노드플러그인은 Docker Desktop 커널에서 CrashLoop 한다.
+  - target: {kind: Driver, group: csi.ceph.io}
+    patch: |-
+      $patch: delete
+      apiVersion: csi.ceph.io/v1
+      kind: Driver
+      metadata:
+        name: ignored
+  - target: {kind: Deployment, name: rook-ceph-operator}
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value: {requests: {memory: 64Mi, cpu: 50m}, limits: {memory: 256Mi}}

@@ -1,0 +1,15 @@
+# 앱이 보는 S3 주소 `rgw`(modu 네임스페이스) → Rook 의 RGW Service(rook-ceph 네임스페이스). storage-service 의 s3.endpoint = http://rgw:80.
+# MinIO(`minio:9000`) 를 2026-10-05 에 Ceph RGW 로 바꿨다(k8s/ceph). 이름을 바꾸면 config-repo 도 같이.
+apiVersion: v1
+kind: Service
+metadata:
+  name: rgw
+  labels:
+    app: rgw
+    app.kubernetes.io/component: data
+spec:
+  type: ExternalName
+  externalName: rook-ceph-rgw-modu.rook-ceph.svc.cluster.local
+  ports:
+    - name: http
+      port: 80

@@ -1,0 +1,80 @@
+# 단일 노드 dev Ceph 클러스터(Rook 예제 cluster-test.yaml 기준). 복제 없음, 대시보드 http 7000, 메모리 상한 명시.
+apiVersion: ceph.rook.io/v1
+kind: CephCluster
+metadata:
+  name: modu
+  namespace: rook-ceph
+spec:
+  dataDirHostPath: /var/lib/rook
+  cephVersion:
+    image: quay.io/ceph/ceph:v20.2.4
+    allowUnsupported: false
+  mon:
+    count: 1
+    allowMultiplePerNode: true
+  mgr:
+    count: 1
+    allowMultiplePerNode: true
+    modules:
+      - name: rook
+        enabled: false
+  dashboard:
+    enabled: true
+    ssl: false
+    port: 7000
+  crashCollector:
+    disable: true
+  logCollector:
+    enabled: false
+  monitoring:
+    enabled: false
+    metricsDisabled: true
+  skipUpgradeChecks: true
+  storage:
+    useAllNodes: true
+    useAllDevices: false
+    devices:
+      - name: loop7
+    allowDeviceClassUpdate: true
+    allowOsdCrushWeightUpdate: false
+  resources:
+    mon: {requests: {memory: 256Mi, cpu: 50m}, limits: {memory: 512Mi}}
+    mgr: {requests: {memory: 256Mi, cpu: 50m}, limits: {memory: 512Mi}}
+    # OSD limit 은 1.2GiB 이상이어야 한다: ceph-osd 가 limit×0.8 을 osd_memory_target 기본값으로 삼는데 896MB(하한) 미만이면 기동 때 assert 로 죽는다.
+    osd: {requests: {memory: 512Mi, cpu: 100m}, limits: {memory: 1536Mi}}
+    prepareosd: {requests: {memory: 128Mi, cpu: 50m}, limits: {memory: 512Mi}}
+    mgr-sidecar: {requests: {memory: 32Mi, cpu: 10m}, limits: {memory: 128Mi}}
+    exporter: {requests: {memory: 32Mi, cpu: 10m}, limits: {memory: 128Mi}}
+  healthCheck:
+    daemonHealth:
+      mon:
+        interval: 45s
+        timeout: 600s
+    muteHealthWarning:
+      AUTH_INSECURE_ROTATING_SERVICE_KEY_TYPE: {policy: mute}
+      AUTH_INSECURE_CLIENT_KEY_TYPE: {policy: mute}
+      AUTH_INSECURE_KEYS_ALLOWED: {policy: mute}
+      AUTH_INSECURE_KEYS_CREATABLE: {policy: mute}
+  priorityClassNames:
+    all: system-node-critical
+    mgr: system-cluster-critical
+  disruptionManagement:
+    managePodBudgets: false
+  cephConfig:
+    global:
+      osd_pool_default_size: "1"
+      mon_warn_on_pool_no_redundancy: "false"
+      bdev_flock_retry: "20"
+      bluefs_buffered_io: "false"
+      mon_data_avail_warn: "10"
+---
+apiVersion: ceph.rook.io/v1
+kind: CephBlockPool
+metadata:
+  name: builtin-mgr
+  namespace: rook-ceph
+spec:
+  name: .mgr
+  replicated:
+    size: 1
+    requireSafeReplicaSize: false
