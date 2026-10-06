@@ -42,6 +42,13 @@ patches:
       data:
         application.resourceTrackingMethod: annotation
         timeout.reconciliation: 180s
+        # PVC 가 Pending 이면 Argo 는 Progressing 으로 보고 sync-wave 가 다음 단계로 못 넘어간다. local-path 는 WaitForFirstConsumer 라
+        # 쓰는 파드가 없는 PVC(예: Pinpoint 를 꺼 둔 pinpoint-hbase-data)는 영원히 Pending — 그걸 Healthy 로 친다(2026-10-06 Colima 이전 때 sync 가 멈췄다).
+        resource.customizations.health.PersistentVolumeClaim: |
+          hs = {}
+          if obj.status ~= nil and obj.status.phase == "Bound" then hs.status = "Healthy"; hs.message = "Bound"; return hs end
+          if obj.status ~= nil and obj.status.phase == "Pending" then hs.status = "Healthy"; hs.message = "Pending (WaitForFirstConsumer)"; return hs end
+          hs.status = "Progressing"; hs.message = "unknown phase"; return hs
   - target: {kind: Deployment, name: argocd-dex-server}
     patch: |-
       - op: replace

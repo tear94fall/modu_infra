@@ -1,4 +1,4 @@
-# dev 오버레이: 로컬 Docker Desktop Kubernetes(context docker-desktop, 1 노드). 네임스페이스는 base 와 같은 modu.
+# dev 오버레이: 로컬 Colima(k3s, context colima, 1 노드 — 2026-10-06 까지는 Docker Desktop 이었다). 네임스페이스는 base 와 같은 modu.
 # 앱 계층 + 인프라(base/data, base/observability) 전부 k8s 안. 2026-10-03 에 compose 인프라와 infra-endpoints(headless Service + Endpoints)를 걷어냈다.
 # config-repo ConfigMap 3개는 여기 없다 — modu_platform 루트 kustomization 을 Argo CD Application modu-config-repo 가 적용한다(2026-10-04, k8s/cicd/argocd).
 #   Argo 없이 손으로 올릴 때: kubectl apply -k ~/workspace/modu_platform
@@ -11,6 +11,7 @@ namespace: modu
 resources:
   - ../../base
   - loadbalancers.yaml
+  - storageclass.yaml     # Colima(k3s)용 StorageClass `standard` (2026-10-06)
 
 # 이미지 태그. base 는 develop(브랜치 롤링 태그). CI 가 올린 태그(예: sha-…)로 바꿔 apply 하면 그 Deployment 만 롤아웃된다.
 images:

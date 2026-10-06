@@ -1,6 +1,6 @@
 # k8s — modu 전체(앱 + 인프라) Kustomize 매니페스트
 
-modu 의 **앱 계층**(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3 = Deployment 17개)과 **인프라 전부**(MySQL×10, Redis, Redis 클러스터×6, ZooKeeper·Kafka·Debezium·Kafka UI, Mongo×3, Ceph(RGW), RabbitMQ, OpenSearch·Dashboards, Prometheus·Grafana·exporter 4개, Pinpoint)를 로컬 Docker Desktop Kubernetes(context `docker-desktop`, 1 노드, 네임스페이스 `modu` 하나)에 띄우는 매니페스트입니다.
+modu 의 **앱 계층**(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3 = Deployment 17개)과 **인프라 전부**(MySQL×10, Redis, Redis 클러스터×6, ZooKeeper·Kafka·Debezium·Kafka UI, Mongo×3, Ceph(RGW), RabbitMQ, OpenSearch·Dashboards, Prometheus·Grafana·exporter 4개, Pinpoint)를 로컬 **Colima**(k3s, context `colima`, 1 노드, 네임스페이스 `modu` 하나 — 2026-10-06 까지는 Docker Desktop)에 띄우는 매니페스트입니다. 아래 [Colima](#colima-2026-10-06-부터).
 인프라의 Service 이름·포트는 compose 컨테이너 이름·포트와 같다(`mysql-chat:3306`, `kafka:9092`, `redis-node-1:6379` …) — 그래서 앱 설정(config-repo, env)은 compose 때와 그대로다. 인프라는 2026-10-03 에 compose 에서 옮겼다(아래 [인프라도 k8s](#인프라도-k8s)).
 
 ```
@@ -17,6 +17,8 @@ k8s/
   overlays/dev/
     kustomization.yaml               # images(태그), replicas, 아래 생성 파일
     loadbalancers.yaml               # Mac 에서 들어오는 입구: 앱 6개 + 인프라 UI 8개(compose 와 같은 호스트 포트)
+    storageclass.yaml                # k3s 용 StorageClass `standard`(local-path) — base 의 PVC 이름을 안 바꾸려고
+    colima-ports.sh                  # LB 포트를 Mac(localhost·LAN IP)으로 내보내는 nginx(stream) 컨테이너
     pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS) — dev 는 2026-10-04 부터 꺼 둠(아래 "Pinpoint 켜기/끄기")
   cicd/argocd/                       # Argo CD(v3.5.3) 설치 + Application 3개(modu-dev, modu-config-repo, modu-ceph) — 아래 "Argo CD 로 배포"
   ceph/                              # Rook-Ceph(RGW = S3, MinIO 대체) — 아래 "Ceph"
@@ -26,11 +28,40 @@ k8s/
   infra.env, mongodb.key             # (gitignored) Secret 의 원본 값·mongo keyFile
 ```
 
+## Colima (2026-10-06 부터)
+
+Docker Desktop(VM 28GB 예약 + 헬퍼 프로세스)이 Mac(32GB)을 잡아먹어 **Colima**(Lima VM + docker + k3s, 전부 CLI)로 바꿨다. 앱 코드·config-repo 는 안 바뀌었고 매니페스트는 StorageClass 하나와 포트 포워딩 스크립트만 늘었다.
+
+```bash
+brew install colima                                   # docker CLI·kubectl 은 이미 있음
+colima start --cpu 8 --memory 20 --disk 120 --vm-type vz --mount-type virtiofs --kubernetes --network-address --network-host-addresses
+#   k3s v1.35(docker 런타임 공유 → docker build 한 이미지를 k8s 가 바로 본다), VM IP 192.168.64.x, context colima. 두 번째부터는 `colima start` 만.
+colima stop | colima status | colima ssh -- free -m     # 멈추기·상태·VM 안
+```
+
+| 항목 | Docker Desktop | Colima(k3s) |
+|---|---|---|
+| StorageClass | `standard`(local-path) | 기본은 `local-path` → `overlays/dev/storageclass.yaml` 이 같은 provisioner 로 `standard` 를 만든다. PV 데이터는 VM 안 `/var/lib/rancher/k3s/storage/` |
+| LoadBalancer | Mac 의 모든 인터페이스로 열림 | ServiceLB 가 **VM IP**(192.168.64.3)에 연다. Mac 의 localhost·LAN IP 로 쓰려면 **`overlays/dev/colima-ports.sh`**(docker 로 nginx stream 컨테이너, 포트 15개를 VM IP 로 중계; Lima 가 docker 가 듣는 포트를 Mac 0.0.0.0 으로 포워딩) — VM 을 새로 만들면 다시. 안드로이드 앱의 `192.168.0.3:8000`, OAuth issuer 도 그대로 |
+| 로컬 이미지 | `docker save \| ctr import` | `docker build` 만(`data/mysql/gh-ost/build-and-import.sh`) |
+| NetworkPolicy | kindnet 이 강제(사고) | flannel, 강제 없음 — Argo 의 NetworkPolicy 삭제 패치는 그대로 둬도 된다 |
+| Ceph | loop + udev DB 꼼수 | VM 에 udevd 가 있어 udev 꼼수는 불필요(DaemonSet 은 그대로, 무해). loop 디스크는 여전히 필요 |
+| 메모리 | VM 28GB | VM 20GB(스택 사용 ≈ 13~15GB). 모자라면 `colima stop && colima start --memory 22` |
+
+**옮긴 절차(2026-10-06)** — 다시 만들 때(`colima delete` 뒤)도 같다:
+1. Docker Desktop 에서 덤프: MySQL 5 소스(`mysqldump --databases … --set-gtid-purged=OFF`), Mongo(`mongodump --archive --gzip`), Ceph 버킷(rclone 파드 → tar), RGW 사용자 키(Secret), Dashboards 저장 객체(`/api/saved_objects/_export`) → `~/modu-data/backup/2026-10-06-colima/`.
+2. `colima start …` → `kubectl apply -f overlays/dev/storageclass.yaml` → `kubectl create ns modu` → `./create-infra-secret.sh` + Secret `config-service` → `kubectl apply -k overlays/dev` 하고 **앱 Deployment 17개는 replicas 0** 으로(인프라 먼저).
+3. Argo(`cicd/argocd`, 두 번), Ceph(`k8s/ceph`, 두 번; 그 전에 Secret `rgw-storage-service-keys` 를 백업 키로 만들면 RGW 사용자 키가 그대로라 config-repo 를 안 건드린다).
+4. MySQL 덤프 적재 → `sh data/mysql/replica-setup.sh all` → Mongo `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh` + `mongorestore --nsExclude 'admin.*'` → Ceph 버킷 rclone 파드로 복원 → Dashboards `_import`.
+5. `kubectl apply -k ~/workspace/modu_platform`(config-repo ConfigMap) → 앱을 config → gateway → 3개씩 순서로 replicas 1 → `colima-ports.sh` → Argo 세 Application Sync(입양) → Flip3 확인.
+
+**밟은 것**: ① Docker Desktop 을 "종료"해도 `com.docker.backend` 가 남아 8000·8090 을 잡고 있었다 — `pkill -f com.docker.backend`. ② Lima 는 "소켓으로 듣는" 게스트 포트만 포워딩하므로 k3s ServiceLB(iptables) 포트는 Mac 에 안 보인다 → `colima-ports.sh`. ③ kustomize 원격 URL(Argo 공식 매니페스트)은 이미지 받는 중엔 git fetch 가 27초 타임아웃에 걸린다 — 재시도. ④ VM 에는 `$HOME` 만 마운트돼 있어 `mktemp`(/var/folders)로 만든 파일을 `docker -v` 로 못 넘긴다. ⑤ Rook 이 만드는 Secret `rook-ceph-object-user-modu-storage-service` 의 키가 실제 RGW 사용자 키(고정한 값)와 달랐다 — 실제 키는 `radosgw-admin --rgw-realm=modu --rgw-zonegroup=modu --rgw-zone=modu user info --uid=storage-service`(operator 파드)로 본다. config-repo 는 고정한 키라 맞다.
+
 ## dev 의 기본 실행 환경 (2026-10-03 부터)
 
 dev 는 **전부 k8s 에서 돈다.** 처음(2026-10-03 오전)엔 앱 계층만 옮기고 인프라는 compose 에 둔 채 headless Service + Endpoints(`gen-infra-endpoints.sh`, 지금은 없음)로 이었고, 같은 날 인프라도 옮겼다. compose 스택(`data/docker-compose.yml`, `monitoring/`, `pinpoint-docker/`, 앱 4개)은 내린 뒤 2026-10-04 에 저장소에서도 지웠다(git 이력에만 있다). 둘을 같이 띄울 메모리가 없다(Docker VM 24GB).
 
-- **입구**: Docker Desktop 의 k8s 는 NodePort 를 localhost 로 내보내지 않지만 **LoadBalancer Service 는 Mac 의 모든 인터페이스(*:포트)로 연다.** compose 가 쓰던 포트 그대로라 앱·콘솔·웹 주소가 안 바뀐다 — 게이트웨이 8000(안드로이드는 `192.168.0.3:8000`), 콘솔 8081/8084/8085, 커머스 웹 8082, config-service 8888(dev 도구용).
+- **입구**: (Colima 에선 `colima-ports.sh` 가 같은 포트를 Mac 으로 연다 — 위 "Colima".) Docker Desktop 시절: NodePort 는 localhost 로 안 나오지만 **LoadBalancer Service 는 Mac 의 모든 인터페이스(*:포트)로 열렸다.** compose 가 쓰던 포트 그대로라 앱·콘솔·웹 주소가 안 바뀐다 — 게이트웨이 8000(안드로이드는 `192.168.0.3:8000`), 콘솔 8081/8084/8085, 커머스 웹 8082, config-service 8888(dev 도구용).
 - **로그**: `otel-collector` DaemonSet 이 `/var/log/pods/modu_*` 를 읽어 compose 와 같은 OpenSearch 인덱스 `modu-app-logs` 로 보낸다(`attributes.project: k8s`, `attributes.container`).
 - **Pinpoint**: **dev 에선 꺼 둔다(2026-10-04 결정 — APM 은 운영 환경에서만, dev 는 필요할 때 켠다; 메모리 상한 약 4.6GiB 를 Argo CD·GoCD 자리로).** 켜는 법은 아래 "Pinpoint 켜기/끄기". 켜면: JVM 13개에 에이전트(컬렉터와 같은 3.1.0, init 컨테이너가 jar 를 복사). 로그 MDC 옵션은 `-Dpinpoint.profiler.logback.logging.transactioninfo=true` 로 덮어써지지만 컬렉터 주소(`profiler.transport.grpc.collector.ip`, 기본 127.0.0.1)는 `-D` 로 안 바뀌어서 init 컨테이너가 설정 파일을 `pinpoint-collector` 로 고친다(`overlays/dev/pinpoint-agent-patch*.yaml`).
 - **롤아웃은 한 번에 하나씩.** (Argo CD 로 Sync 하면 JVM Deployment 의 `sync-wave` 1~13 이 이 순서를 자동으로 지킨다 — 아래 "Argo CD 로 배포". 손으로 `kubectl apply -k` 할 때만 아래 절차.) 단일 노드·빠듯한 메모리에서 13개 Deployment 의 pod 템플릿을 한꺼번에 바꾸면(공통 패치 수정 + `apply -k`) maxSurge 1 때문에 JVM 이 26개가 되어 노드가 멈춘다(2026-10-03 실제로 API 서버가 응답 불능). 공통 변경은:
