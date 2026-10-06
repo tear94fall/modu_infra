@@ -1,0 +1,130 @@
+# deploy-service(modu_platform): 모두 시스템 "배포" 탭의 백엔드 — GHCR 태그 조회, modu_infra 의 overlays/dev/kustomization.yaml 태그 커밋,
+# Argo CD Sync(계정 deploy, role:deployer), Deployment 롤아웃 진행률. 설정(토큰 포함)은 config-repo/deploy-service.yml(modu_platform).
+# k8s 에는 modu 네임스페이스의 Deployment·ReplicaSet·Pod 를 읽기만 한다(아래 Role) — 적용은 Argo 가 한다.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: deploy-service
+  labels:
+    app: deploy-service
+    app.kubernetes.io/component: platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deploy-service
+  labels:
+    app: deploy-service
+    app.kubernetes.io/component: platform
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deploy-service
+  labels:
+    app: deploy-service
+    app.kubernetes.io/component: platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: deploy-service
+subjects:
+  - kind: ServiceAccount
+    name: deploy-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: deploy-service
+  annotations:
+    # Argo CD sync-wave: JVM Deployment 는 한 번에 하나씩 롤아웃(앞 wave 가 Healthy 돼야 다음). 인프라·nginx 는 0(기본).
+    argocd.argoproj.io/sync-wave: "14"
+  labels:
+    app: deploy-service
+    app.kubernetes.io/name: deploy-service
+    app.kubernetes.io/component: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: deploy-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: deploy-service
+        app.kubernetes.io/name: deploy-service
+        app.kubernetes.io/component: platform
+    spec:
+      serviceAccountName: deploy-service
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: false
+      containers:
+      - name: deploy-service
+        image: ghcr.io/tear94fall/modu-platform/deploy-service:develop
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8900
+        env:
+        - name: CONFIG_SERVER_URI
+          value: "http://config-service:8888"
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Dprofiler.logback.logging.transactioninfo=true"
+        startupProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8900
+          periodSeconds: 5
+          failureThreshold: 30
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8900
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 6
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8900
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 3
+          timeoutSeconds: 3
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 640Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: deploy-service
+  labels:
+    app: deploy-service
+    app.kubernetes.io/name: deploy-service
+    app.kubernetes.io/component: platform
+spec:
+  selector:
+    app: deploy-service
+  ports:
+  - name: http
+    port: 8900
+    targetPort: http
