@@ -8,9 +8,9 @@ modu 프로젝트(modu_messenger, modu_commerce)가 같이 쓰는 인프라와 �
 - modu_commerce — https://github.com/tear94fall/modu_commerce (경로: `../modu_commerce`)
 - modu_platform — https://github.com/tear94fall/modu_platform (경로: `../modu_platform`, config-repo 와 `.env`)
 
-## 구성 (2026-10-03 부터 전부 k8s)
+## 구성 (2026-10-03 부터 전부 k8s, 2026-10-06 부터 Colima)
 
-dev 환경은 **앱도 인프라도 Docker Desktop Kubernetes(context `docker-desktop`, 네임스페이스 `modu`)** 에서 돈다. 매니페스트와 운영 절차는 [`k8s/README.md`](k8s/README.md).
+dev 환경은 **앱도 인프라도 Colima(k3s, context `colima`, 네임스페이스 `modu`; 2026-10-06 까지는 Docker Desktop)** 에서 돈다. 매니페스트와 운영 절차는 [`k8s/README.md`](k8s/README.md).
 compose 구성(`data/docker-compose.yml`, `monitoring/`, `pinpoint-docker/`)은 2026-10-04 에 저장소에서 지웠다 — 원본 설정이 궁금하면 git 이력(태그 없음, `git log -- monitoring`)을 본다.
 
 | 디렉터리 | 내용 |
