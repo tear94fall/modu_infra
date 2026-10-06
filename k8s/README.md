@@ -7,7 +7,7 @@ modu 의 **앱 계층**(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3 = De
 k8s/
   base/                              # 환경 공통. namespace modu, 공통 라벨 app.kubernetes.io/part-of=modu
     namespace.yaml
-    platform/   config-service.yaml gateway-service.yaml           # replicas 2
+    platform/   config-service.yaml gateway-service.yaml deploy-service.yaml   # config·gateway replicas 2; deploy-service = 배포 탭 백엔드(SA+Role 읽기 전용)
     messenger/  auth member chat chat-store ws push storage profile point schedule (-service.yaml)
     commerce/   commerce-service.yaml web.yaml
     admin/      modu-admin.yaml modu-system.yaml modu-internal.yaml
@@ -307,7 +307,8 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 - **ApplyOutOfSyncOnly**: 바뀐 객체만 apply. 완료된 Job(`redis-cluster-init`)은 `spec` 비교 제외.
 - 뺀 컴포넌트: dex(SSO)·notifications·applicationset 은 replicas 0. 메모리 limits 합 ≈ 1.1GiB(Pinpoint 를 끄며 비운 자리).
 
-**배포 절차(지금)**: CI 가 올린 태그를 `overlays/dev/kustomization.yaml` 의 `images[].newTag`(`develop-<sha7>`)에 적어 PR → main 머지 → Argo UI 에서 `modu-dev` Sync(또는 Refresh 뒤 바뀐 Deployment 만 선택 Sync). 롤백은 Git revert → Sync, 또는 UI History 에서 이전 커밋으로 Sync.
+**배포 절차**: 모두 시스템 콘솔(http://localhost:8084) → **배포** 탭 → 서비스 행의 [배포] → CI 가 올린 태그(`develop-<sha7>`, 커밋 메시지·시각 표시) 선택 → 배포. 뒤에서 `deploy-service`(modu_platform, `base/platform/deploy-service.yaml`)가 ① `overlays/dev/kustomization.yaml` 의 `images[].newTag` 를 GitHub API 로 main 에 커밋 → ② Argo CD 계정 `deploy`(role:deployer, 이 저장소 `cicd/argocd` 의 argocd-cm/argocd-rbac-cm 패치)로 그 Deployment 만 Sync → ③ 롤아웃을 지켜보며 진행률(커밋 20% → 동기화 50% → 파드 준비 100%)을 돌려준다. 롤백은 같은 탭의 [롤백](직전 성공 태그). 손으로 할 때는 예전처럼 태그 PR → 머지 → Argo UI Sync.
+토큰 둘(GitHub contents:write+read:packages, Argo deploy 계정 API 키)은 modu_platform `config-repo/deploy-service.yml` 에 `{cipher}` 로 있다. Argo 토큰 재발급: admin 으로 `POST /api/v1/account/deploy/token` → 다시 암호화.
 
 2026-10-04 도입 때: 기존 객체 144개를 그대로 "입양"(첫 Sync 는 tracking annotation 과 sync-wave annotation 만 추가, 파드 재시작 0). 도입 PR 머지 전까지 두 Application 의 `targetRevision` 을 feature 브랜치로 바꿔 두었다가(main 에는 아직 `config-repo-configmaps.yaml` 참조가 있어 빌드가 안 됨) 머지 후 매니페스트대로(`main`/`develop`) 되돌린다.
 

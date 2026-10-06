@@ -42,6 +42,10 @@ patches:
       data:
         application.resourceTrackingMethod: annotation
         timeout.reconciliation: 180s
+        # 모두 시스템 배포 탭(deploy-service)용 로컬 계정. API 키만(로그인 불가). 토큰 발급: admin 으로 POST /api/v1/account/deploy/token →
+        # config-repo/deploy-service.yml 의 deploy.argocd.token 에 {cipher} 로. 권한은 아래 argocd-rbac-cm(role:deployer — applications get·sync 만).
+        accounts.deploy: apiKey
+        accounts.deploy.enabled: "true"
         # PVC 가 Pending 이면 Argo 는 Progressing 으로 보고 sync-wave 가 다음 단계로 못 넘어간다. local-path 는 WaitForFirstConsumer 라
         # 쓰는 파드가 없는 PVC(예: Pinpoint 를 꺼 둔 pinpoint-hbase-data)는 영원히 Pending — 그걸 Healthy 로 친다(2026-10-06 Colima 이전 때 sync 가 멈췄다).
         resource.customizations.health.PersistentVolumeClaim: |
@@ -49,6 +53,17 @@ patches:
           if obj.status ~= nil and obj.status.phase == "Bound" then hs.status = "Healthy"; hs.message = "Bound"; return hs end
           if obj.status ~= nil and obj.status.phase == "Pending" then hs.status = "Healthy"; hs.message = "Pending (WaitForFirstConsumer)"; return hs end
           hs.status = "Progressing"; hs.message = "unknown phase"; return hs
+  - patch: |-
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: argocd-rbac-cm
+      data:
+        policy.default: ""
+        policy.csv: |
+          p, role:deployer, applications, get, default/*, allow
+          p, role:deployer, applications, sync, default/*, allow
+          g, deploy, role:deployer
   - target: {kind: Deployment, name: argocd-dex-server}
     patch: |-
       - op: replace

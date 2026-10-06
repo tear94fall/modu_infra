@@ -18,6 +18,7 @@ resources:
   - namespace.yaml
   - platform/config-service.yaml
   - platform/gateway-service.yaml
+  - platform/deploy-service.yaml
   - messenger/auth-service.yaml
   - messenger/member-service.yaml
   - messenger/chat-service.yaml

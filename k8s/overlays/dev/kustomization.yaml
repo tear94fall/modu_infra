@@ -19,6 +19,8 @@ images:
     newTag: develop
   - name: ghcr.io/tear94fall/modu-platform/gateway-service
     newTag: develop
+  - name: ghcr.io/tear94fall/modu-platform/deploy-service
+    newTag: develop
   - name: ghcr.io/tear94fall/modu-chat/auth-service
     newTag: develop
   - name: ghcr.io/tear94fall/modu-chat/member-service
@@ -56,6 +58,8 @@ replicas:
   - name: config-service
     count: 1
   - name: gateway-service
+    count: 1
+  - name: deploy-service
     count: 1
   - name: auth-service
     count: 1
