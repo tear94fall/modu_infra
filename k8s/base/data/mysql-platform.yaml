@@ -1,0 +1,162 @@
+# mysql-platform: 플랫폼 서비스용 DB(2026-10-07). deploy-service 의 배포 이력(modu-platform.deployment). 지금은 단일 인스턴스(레플리카 없음 —
+# 읽기 부하가 없다). server-id 15, GTID + ROW binlog(나중에 레플리카를 붙일 수 있게). root=PLATFORM_DB_PASSWORD, 앱 계정 platform=PLATFORM_DB_USER_PASSWORD(Secret infra).
+# 스키마는 처음 기동 때 ConfigMap mysql-platform-init(/docker-entrypoint-initdb.d)이 만든다 — 볼륨에 데이터가 있으면 다시 안 돈다. 이후 변경은 DBA(gh-ost).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-platform-init
+  labels:
+    app: mysql-platform
+    app.kubernetes.io/component: data
+data:
+  01-schema.sql: |
+    -- mysql-platform 처음 기동 때 한 번 실행(/docker-entrypoint-initdb.d). 기준선은 data/mysql/schema/platform.modu-platform.sql — 둘을 같이 고친다.
+    -- 이후 스키마 변경은 DBA(gh-ost) — data/mysql/DBA.md.
+    CREATE DATABASE IF NOT EXISTS `modu-platform` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+    USE `modu-platform`;
+    CREATE TABLE IF NOT EXISTS `deployment` (
+      `id`            varchar(40)   NOT NULL,
+      `service`       varchar(64)   NOT NULL,
+      `tag`           varchar(128)  NOT NULL,
+      `previous_tag`  varchar(128)  DEFAULT NULL,
+      `by_name`       varchar(128)  NOT NULL,
+      `by_id`         varchar(128)  DEFAULT NULL,
+      `status`        varchar(16)   NOT NULL,
+      `step`          varchar(16)   NOT NULL,
+      `percent`       int           NOT NULL DEFAULT 0,
+      `started_at`    datetime(6)   NOT NULL,
+      `finished_at`   datetime(6)   DEFAULT NULL,
+      `error`         text,
+      `commit_sha`    varchar(64)   DEFAULT NULL,
+      `commit_url`    varchar(255)  DEFAULT NULL,
+      `steps_json`    json          NOT NULL,
+      `rollout_json`  json          DEFAULT NULL,
+      `created_at`    datetime(6)   NOT NULL,
+      `updated_at`    datetime(6)   NOT NULL,
+      PRIMARY KEY (`id`),
+      KEY `idx_deployment_service_started` (`service`, `started_at` DESC),
+      KEY `idx_deployment_started` (`started_at` DESC),
+      KEY `idx_deployment_status` (`status`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-platform
+  labels:
+    app: mysql-platform
+    app.kubernetes.io/name: mysql-platform
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-platform
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-platform
+  template:
+    metadata:
+      labels:
+        app: mysql-platform
+        app.kubernetes.io/name: mysql-platform
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=15"
+        - "--log-bin=mysql-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_DATABASE
+          value: modu-platform
+        - name: MYSQL_USER
+          value: platform
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: PLATFORM_DB_USER_PASSWORD
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: PLATFORM_DB_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 50m
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+        - name: init
+          mountPath: /docker-entrypoint-initdb.d
+          readOnly: true
+      volumes:
+      - name: init
+        configMap:
+          name: mysql-platform-init
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-platform
+  labels:
+    app: mysql-platform
+    app.kubernetes.io/name: mysql-platform
+    app.kubernetes.io/component: data
+spec:
+  selector:
+    app: mysql-platform
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
