@@ -11,7 +11,7 @@ k8s/
     messenger/  auth member chat chat-store ws push storage profile point schedule (-service.yaml)
     commerce/   commerce-service.yaml web.yaml
     admin/      modu-admin.yaml modu-system.yaml modu-internal.yaml
-    data/       mysql.yaml(10) mysql-platform.yaml(deploy-service 이력 DB) redis.yaml redis-cluster.yaml(6 + init Job) kafka.yaml(zookeeper·kafka·debezium·kafka-ui) mongo.yaml(3) rgw.yaml(ExternalName → ceph/) rabbitmq.yaml
+    data/       mysql.yaml(10) mysql-platform.yaml(deploy-service 이력 DB, 소스+레플리카) redis.yaml redis-cluster.yaml(6 + init Job) kafka.yaml(zookeeper·kafka·debezium·kafka-ui) mongo.yaml(3) rgw.yaml(ExternalName → ceph/) rabbitmq.yaml
     observability/  opensearch.yaml(+dashboards) otel-collector.yaml(파드 로그 DaemonSet) prometheus.yaml(+RBAC) grafana.yaml(+grafana/dashboards/*.json)
                     exporters.yaml(mysqld·redis·mongodb·kafka) pinpoint.yaml(hbase·mysql·redis·zoo1·collector·web)
   overlays/dev/
@@ -159,7 +159,8 @@ Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커
 | 구성 요소 | 종류 | 이미지 | Service:포트 | PVC | 메모리 req / limit |
 |---|---|---|---|---|---|
 | mysql-{member,chat,push,profile} + `-replica` | STS ×8 | mysql:8.0.32 | :3306 | 2Gi | 384Mi / 768Mi |
-| mysql-platform | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 플랫폼 서비스용(2026-10-07): deploy-service 배포 이력 `modu-platform.deployment`. 단일 인스턴스, 초기 스키마는 ConfigMap mysql-platform-init, 계정 platform(PLATFORM_DB_*) |
+| mysql-platform | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 플랫폼 서비스용(2026-10-07): deploy-service 배포 이력 `modu-platform.deployment`. 소스(쓰기). 초기 스키마는 ConfigMap mysql-platform-init(빈 볼륨 첫 기동 때만), 계정 platform(PLATFORM_DB_*) |
+| mysql-platform-replica | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 레플리카(읽기, server-id 25, super_read_only). 복제·읽기 계정 platform_ro 는 `sh data/mysql/replica-setup.sh platform`(PLATFORM_REPL/RO_PASSWORD). deploy-service 의 이력 목록 조회가 여기로 |
 | mysql-commerce(-replica) | STS ×2 | mysql:8.0.44 | :3306 | 2Gi | 384Mi / 768Mi |
 | redis | STS | redis:7.2.4-alpine | :6379 | 256Mi | 32Mi / 128Mi |
 | redis-node-1..6 | STS ×6 + Job `redis-cluster-init` | redis:7.4.11-alpine | :6379, :16379 | 256Mi | 32Mi / 128Mi |
