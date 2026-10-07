@@ -1,0 +1,226 @@
+# mysql-platform: 플랫폼 서비스용 DB(2026-10-07). deploy-service 의 배포 이력(modu-platform.deployment). 소스(쓰기) + 레플리카(읽기, 아래)
+# — 다른 서비스와 같은 R/W 분리(2026-10-08). server-id 15, GTID + ROW binlog(나중에 레플리카를 붙일 수 있게). root=PLATFORM_DB_PASSWORD, 앱 계정 platform=PLATFORM_DB_USER_PASSWORD(Secret infra).
+# 스키마는 앱도 init 스크립트도 만들지 않는다(2026-10-08 결정). 새 클러스터면 DBA 가 기준선을 손으로 적용: sh data/mysql/apply-baseline.sh platform
+# (data/mysql/schema/platform.modu-platform.sql) → 그다음 replica-setup.sh platform. 이후 변경은 DBA(gh-ost).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-platform
+  labels:
+    app: mysql-platform
+    app.kubernetes.io/name: mysql-platform
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-platform
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-platform
+  template:
+    metadata:
+      labels:
+        app: mysql-platform
+        app.kubernetes.io/name: mysql-platform
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=15"
+        - "--log-bin=mysql-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_DATABASE
+          value: modu-platform
+        - name: MYSQL_USER
+          value: platform
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: PLATFORM_DB_USER_PASSWORD
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: PLATFORM_DB_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 50m
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-platform
+  labels:
+    app: mysql-platform
+    app.kubernetes.io/name: mysql-platform
+    app.kubernetes.io/component: data
+spec:
+  selector:
+    app: mysql-platform
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql
+---
+# mysql-platform-replica: 읽기 DB(레플리카, server-id 25). DB·계정·스키마는 복제로 받는다(init 스크립트 없음).
+# 복제는 처음 한 번 수동으로 건다: sh data/mysql/replica-setup.sh platform (repl 계정 PLATFORM_REPL_PASSWORD, 읽기 계정 platform_ro = PLATFORM_RO_PASSWORD).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql-platform-replica
+  labels:
+    app: mysql-platform-replica
+    app.kubernetes.io/name: mysql-platform-replica
+    app.kubernetes.io/component: data
+spec:
+  serviceName: mysql-platform-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-platform-replica
+  template:
+    metadata:
+      labels:
+        app: mysql-platform-replica
+        app.kubernetes.io/name: mysql-platform-replica
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: mysql
+        image: mysql:8.0.32
+        imagePullPolicy: IfNotPresent
+        args:
+        - mysqld
+        - "--server-id=25"
+        - "--log-bin=mysql-bin"
+        - "--binlog-format=ROW"
+        - "--gtid-mode=ON"
+        - "--enforce-gtid-consistency=ON"
+        - "--binlog-expire-logs-seconds=604800"
+        env:
+        - name: MYSQL_ROOT_HOST
+          value: "%"
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: PLATFORM_DB_PASSWORD
+        ports:
+        - name: mysql
+          containerPort: 3306
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 60
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - "-c"
+            - MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin ping -h 127.0.0.1 -u root
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: mysql
+          periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 50m
+          limits:
+            memory: 512Mi
+        volumeMounts:
+        - name: data
+          mountPath: "/var/lib/mysql"
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      storageClassName: standard
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-platform-replica
+  labels:
+    app: mysql-platform-replica
+    app.kubernetes.io/name: mysql-platform-replica
+    app.kubernetes.io/component: data
+spec:
+  selector:
+    app: mysql-platform-replica
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: mysql

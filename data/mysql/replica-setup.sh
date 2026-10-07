@@ -83,9 +83,11 @@ target() {
               messenger member "$dbs" "modu-chat modu-point modu-schedule" ;;
     chat|push|profile) messenger "$1" "modu-chat" "modu-chat" ;;
     commerce) setup commerce "$(secret_val COMMERCE_REPL_PASSWORD)" commerce_ro "$(secret_val COMMERCE_RO_PASSWORD)" commerce commerce ;;
+    # 플랫폼 서비스 DB(deploy-service 배포 이력). root 는 파드 env(PLATFORM_DB_PASSWORD 에서 온 MYSQL_ROOT_PASSWORD).
+    platform) setup platform "$(secret_val PLATFORM_REPL_PASSWORD)" platform_ro "$(secret_val PLATFORM_RO_PASSWORD)" modu-platform modu-platform ;;
     messenger) for t in member chat push profile; do target "$t"; done ;;
-    all)       for t in member chat push profile commerce; do target "$t"; done ;;
-    *) echo "사용: sh data/mysql/replica-setup.sh member|chat|push|profile|commerce|messenger|all" >&2; exit 2 ;;
+    all)       for t in member chat push profile commerce platform; do target "$t"; done ;;
+    *) echo "사용: sh data/mysql/replica-setup.sh member|chat|push|profile|commerce|platform|messenger|all" >&2; exit 2 ;;
   esac
 }
 

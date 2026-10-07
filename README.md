@@ -15,8 +15,8 @@ compose 구성(`data/docker-compose.yml`, `monitoring/`, `pinpoint-docker/`)은 
 
 | 디렉터리 | 내용 |
 |---|---|
-| `k8s/` | Kustomize 매니페스트 — `base/{platform,messenger,commerce,admin}` 앱 17개, `base/data`(MySQL 10, Redis, Redis 클러스터 6, ZooKeeper·Kafka·Debezium·kafka-ui, Mongo 3, MinIO, RabbitMQ), `base/observability`(OpenSearch·Dashboards, Prometheus·Grafana·exporter, Pinpoint, OTel Collector), `overlays/dev`, `cicd/argocd`(Argo CD + Application 2개 — dev 배포는 Argo Sync 로). Secret 의 원본은 `k8s/infra.env`·`k8s/mongodb.key`(gitignored, 틀은 `k8s/infra-secrets.example.env`) |
-| `data/mysql/` | 스키마 기준선·변경 이력·gh-ost·DBA 절차 + k8s 운영 스크립트(복제 설정, gh-ost, 기준선 덤프, 고아 행 점검). 아래 "스키마 관리"·"운영 스크립트" |
+| `k8s/` | Kustomize 매니페스트 — `base/{platform,messenger,commerce,admin}` 앱 17개, `base/data`(MySQL 10 + 플랫폼용 mysql-platform(+replica), Redis, Redis 클러스터 6, ZooKeeper·Kafka·Debezium·kafka-ui, Mongo 3, MinIO, RabbitMQ), `base/observability`(OpenSearch·Dashboards, Prometheus·Grafana·exporter, Pinpoint, OTel Collector), `overlays/dev`, `cicd/argocd`(Argo CD + Application 2개 — dev 배포는 Argo Sync 로). Secret 의 원본은 `k8s/infra.env`·`k8s/mongodb.key`(gitignored, 틀은 `k8s/infra-secrets.example.env`) |
+| `data/mysql/` | 스키마 기준선·변경 이력·gh-ost·DBA 절차 + k8s 운영 스크립트(복제 설정, gh-ost, 기준선 덤프·새 클러스터 기준선 적용, 고아 행 점검). 아래 "스키마 관리"·"운영 스크립트" |
 | `data/mysql-commerce/` | `replica-setup.sh` — 커머스 복제 설정(공통 스크립트를 `commerce` 로 부르는 껍데기) |
 | `data/kafka/` | 토픽 생성·조회·삭제 — `kubectl -n modu exec kafka-0 -- kafka-topics …` |
 | `data/debezium/` | CDC 커넥터 등록·조회·삭제 — debezium 파드 안의 curl 로 Kafka Connect REST |
@@ -51,7 +51,7 @@ MySQL 스키마는 애플리케이션이 아니라 DBA 가 gh-ost 로 바꿉니�
 
 - `data/mysql/DBA.md` — 원칙(외래키 없음, 두 버전 공존), 변경 한 건의 흐름, 방법 선택 표, k8s 에서 gh-ost 돌리는 법
 - `data/mysql/schema/*.sql` — 스키마 기준선 7개, `schema/changes/` — 변경 이력, `schema/checks/` — 고아 행 점검
-- `data/mysql/ghost.sh` — gh-ost 실행(일회용 파드), `ghost-user-setup.sh` — gh-ost 계정, `dump-schema.sh` — 기준선 갱신, `check-orphans.sh` — 점검, `gh-ost/build-and-import.sh` — gh-ost 이미지를 노드에 넣기
+- `data/mysql/ghost.sh` — gh-ost 실행(일회용 파드), `ghost-user-setup.sh` — gh-ost 계정, `dump-schema.sh` — 기준선 갱신, `apply-baseline.sh` — 새 클러스터에서 빈 DB 에 기준선 적용(스키마는 손으로 만든다), `check-orphans.sh` — 점검, `gh-ost/build-and-import.sh` — gh-ost 이미지를 노드에 넣기
 
 ## 운영 스크립트 (전부 k8s 기준 — `kubectl -n modu exec`)
 
@@ -61,7 +61,7 @@ MySQL 스키마는 애플리케이션이 아니라 DBA 가 gh-ost 로 바꿉니�
 - `data/debezium/{list,create,delete}_connector.sh`: `deploy/debezium` 파드 안의 curl → `localhost:8083`. `create_connector.sh` 는 `mysql-chat:3306` 을 보고, 비밀번호(Secret `MYSQL_ROOT_PASSWORD`)는 JSON 본문을 stdin 으로 넘긴다.
 - Mongo replica set 최초 구성: `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh` (ConfigMap `mongo-rs-init`, `k8s/base/data/mongo.yaml`. 최초 1회만 — 지금 데이터는 이미 구성돼 있다)
 - `data/mysql/replica-setup.sh <대상>`: MySQL 읽기·쓰기 분리. 소스 파드 `mysql-<x>-0`(GTID·binlog ROW) → 레플리카 `mysql-<x>-replica-0` GTID 비동기 복제를 건다. 여러 번 돌려도 된다.
-  - 대상: `member` `chat` `push` `profile` `commerce`, 묶음 `messenger`(앞의 넷) `all`. (`data/mysql-commerce/replica-setup.sh` 는 `commerce` 를 부르는 껍데기)
+  - 대상: `member` `chat` `push` `profile` `commerce` `platform`, 묶음 `messenger`(앞의 넷) `all`. (`data/mysql-commerce/replica-setup.sh` 는 `commerce` 를 부르는 껍데기)
   - 복제 계정 `repl` 과 앱 읽기 계정(메신저 `modu_ro`, 커머스 `commerce_ro`, SELECT 만)을 소스에 만든다(복제로 레플리카에 전파). 비밀번호는 Secret `infra` 의 `MESSENGER_REPL_PASSWORD`·`MESSENGER_RO_PASSWORD`, `COMMERCE_REPL_PASSWORD`·`COMMERCE_RO_PASSWORD`.
   - 레플리카가 복제 중이 아니면 소스 DB 를 GTID 위치와 함께 덤프해(`kubectl exec` 소스 mysqldump → `kubectl exec -i` 레플리카 mysql, Mac 을 거쳐 간다) 적재한 뒤 `SOURCE_HOST=mysql-<x>`(Service), `SOURCE_AUTO_POSITION=1` 로 복제를 시작하고 `read_only`·`super_read_only` 를 `SET PERSIST` 로 켠다. 복제 중이면 계정만 맞춘다.
   - mysql-member 에는 `modu-chat`(회원)·`modu-point`(포인트)·`modu-schedule`(스케줄) 스키마가 함께 있다. 복제를 건 뒤 소스에서 만든 스키마는 복제로 따라온다.

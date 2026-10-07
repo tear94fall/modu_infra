@@ -20,10 +20,11 @@
 
 | 경로 | 내용 |
 |---|---|
-| `schema/<instance>.<schema>.sql` | 스키마 기준선 7개 (member: modu-chat·modu-point·modu-schedule, chat·push·profile: modu-chat, commerce: commerce). 데이터 없음 |
+| `schema/<instance>.<schema>.sql` | 스키마 기준선 8개 (member: modu-chat·modu-point·modu-schedule, chat·push·profile: modu-chat, commerce: commerce, platform: modu-platform). 데이터 없음 |
 | `schema/changes/YYYY-MM-DD-<topic>.sql` | 변경 이력. 파일 머리에 대상·사유·적용 방식·되돌리기 |
 | `schema/checks/orphans.sql` | 고아 행 점검 쿼리(지운 FK 28쌍) |
 | `dump-schema.sh` | 기준선 다시 뜨기 (`OUT_DIR=` 로 다른 곳에 떠서 비교할 수 있다) |
+| `apply-baseline.sh <instance>` | **새 클러스터 전용**: 빈 소스 DB 에 기준선을 손으로 적용(표가 하나라도 있으면 건너뛴다). 앱은 `validate` 만 하고 init 스크립트도 없으니 새 DB 의 스키마는 이걸로 만든다 |
 | `ghost.sh` | gh-ost 실행 래퍼 — k8s 일회용 파드(`kubectl run --rm`) |
 | `ghost-user-setup.sh` | gh-ost 계정(`ghost`) 만들기 — 소스마다 한 번 |
 | `check-orphans.sh` | 고아 행 점검 실행(레플리카에서) |
@@ -105,3 +106,13 @@ gh-ost 가 **못 하는 것**: FK 있는 테이블(우리는 없음), PK/유니�
 1. `k8s/infra.env` 에 `GHOST_PASSWORD` → `k8s/create-infra-secret.sh` → `sh data/mysql/ghost-user-setup.sh`. gh-ost 이미지는 `sh data/mysql/gh-ost/build-and-import.sh`(노드마다).
 2. `schema/changes/` 를 날짜순으로 적용. 단 `2026-10-03-drop-foreign-keys.sql` 의 제약 이름은 환경마다 다르니 파일 머리의 쿼리로 다시 뽑는다.
 3. 적용 뒤 `OUT_DIR=/tmp/schema sh data/mysql/dump-schema.sh` 결과가 저장소의 기준선과 같은지 diff 로 확인한다(다르면 그 환경에 손으로 바꾼 흔적이 있는 것).
+
+
+## 새 클러스터에서 스키마 만들기 (2026-10-08 결정)
+
+스키마는 **사람(DBA)이 손으로 적용한다** — 앱은 `ddl-auto: validate` 만 하고, MySQL init 스크립트(`/docker-entrypoint-initdb.d`)도 두지 않는다. 기준선 파일 하나만 진실이라 두 군데가 어긋날 일이 없다.
+
+1. 소스 DB 가 뜨면: `sh data/mysql/apply-baseline.sh <instance>` (예: `platform`). 이미 표가 있으면 건너뛴다.
+2. 데이터가 있으면 덤프 복원(이 경우 1 은 필요 없다 — 덤프에 스키마가 들어 있다).
+3. 레플리카: `sh data/mysql/replica-setup.sh <instance>` — 소스를 덤프해 레플리카에 싣고 복제를 건다.
+4. 그다음 앱을 띄운다(validate 가 표를 찾는다).
