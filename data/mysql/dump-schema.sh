@@ -3,7 +3,7 @@
 # 변경을 적용한 뒤 항상 다시 떠서 변경 SQL(schema/changes/)과 같은 PR 에 넣는다 — 기준선이 "지금 운영 DB 모양"이다.
 #
 #   sh data/mysql/dump-schema.sh            # 전부                  (NS=modu 기본)
-#   sh data/mysql/dump-schema.sh commerce   # 하나만 (member | chat | push | profile | commerce)
+#   sh data/mysql/dump-schema.sh commerce   # 하나만 (member | chat | push | profile | commerce | platform)
 #   OUT_DIR=/tmp/schema sh data/mysql/dump-schema.sh   # 저장소 대신 다른 디렉터리로(비교용)
 #
 # root 비밀번호는 파드 env MYSQL_ROOT_PASSWORD 를 파드 안에서만 쓴다.
@@ -26,11 +26,12 @@ dump() { # $1 instance  $2 schema
   echo "== $out ($(grep -c '^CREATE TABLE' "$out") tables)"
 }
 
-for t in ${*:-member chat push profile commerce}; do
+for t in ${*:-member chat push profile commerce platform}; do
   case "$t" in
     member)   for s in modu-chat modu-point modu-schedule; do dump member "$s"; done ;;
     chat|push|profile) dump "$t" modu-chat ;;
     commerce) dump commerce commerce ;;
-    *) echo "사용: sh data/mysql/dump-schema.sh [member|chat|push|profile|commerce ...]" >&2; exit 2 ;;
+    platform) dump platform modu-platform ;;
+    *) echo "사용: sh data/mysql/dump-schema.sh [member|chat|push|profile|commerce|platform ...]" >&2; exit 2 ;;
   esac
 done

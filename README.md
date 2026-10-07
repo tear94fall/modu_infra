@@ -16,7 +16,7 @@ compose 구성(`data/docker-compose.yml`, `monitoring/`, `pinpoint-docker/`)은 
 | 디렉터리 | 내용 |
 |---|---|
 | `k8s/` | Kustomize 매니페스트 — `base/{platform,messenger,commerce,admin}` 앱 17개, `base/data`(MySQL 10 + 플랫폼용 mysql-platform(+replica), Redis, Redis 클러스터 6, ZooKeeper·Kafka·Debezium·kafka-ui, Mongo 3, MinIO, RabbitMQ), `base/observability`(OpenSearch·Dashboards, Prometheus·Grafana·exporter, Pinpoint, OTel Collector), `overlays/dev`, `cicd/argocd`(Argo CD + Application 2개 — dev 배포는 Argo Sync 로). Secret 의 원본은 `k8s/infra.env`·`k8s/mongodb.key`(gitignored, 틀은 `k8s/infra-secrets.example.env`) |
-| `data/mysql/` | 스키마 기준선·변경 이력·gh-ost·DBA 절차 + k8s 운영 스크립트(복제 설정, gh-ost, 기준선 덤프, 고아 행 점검). 아래 "스키마 관리"·"운영 스크립트" |
+| `data/mysql/` | 스키마 기준선·변경 이력·gh-ost·DBA 절차 + k8s 운영 스크립트(복제 설정, gh-ost, 기준선 덤프·새 클러스터 기준선 적용, 고아 행 점검). 아래 "스키마 관리"·"운영 스크립트" |
 | `data/mysql-commerce/` | `replica-setup.sh` — 커머스 복제 설정(공통 스크립트를 `commerce` 로 부르는 껍데기) |
 | `data/kafka/` | 토픽 생성·조회·삭제 — `kubectl -n modu exec kafka-0 -- kafka-topics …` |
 | `data/debezium/` | CDC 커넥터 등록·조회·삭제 — debezium 파드 안의 curl 로 Kafka Connect REST |
@@ -51,7 +51,7 @@ MySQL 스키마는 애플리케이션이 아니라 DBA 가 gh-ost 로 바꿉니�
 
 - `data/mysql/DBA.md` — 원칙(외래키 없음, 두 버전 공존), 변경 한 건의 흐름, 방법 선택 표, k8s 에서 gh-ost 돌리는 법
 - `data/mysql/schema/*.sql` — 스키마 기준선 7개, `schema/changes/` — 변경 이력, `schema/checks/` — 고아 행 점검
-- `data/mysql/ghost.sh` — gh-ost 실행(일회용 파드), `ghost-user-setup.sh` — gh-ost 계정, `dump-schema.sh` — 기준선 갱신, `check-orphans.sh` — 점검, `gh-ost/build-and-import.sh` — gh-ost 이미지를 노드에 넣기
+- `data/mysql/ghost.sh` — gh-ost 실행(일회용 파드), `ghost-user-setup.sh` — gh-ost 계정, `dump-schema.sh` — 기준선 갱신, `apply-baseline.sh` — 새 클러스터에서 빈 DB 에 기준선 적용(스키마는 손으로 만든다), `check-orphans.sh` — 점검, `gh-ost/build-and-import.sh` — gh-ost 이미지를 노드에 넣기
 
 ## 운영 스크립트 (전부 k8s 기준 — `kubectl -n modu exec`)
 

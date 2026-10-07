@@ -52,7 +52,7 @@ colima stop | colima status | colima ssh -- free -m     # 멈추기·상태·VM 
 1. Docker Desktop 에서 덤프: MySQL 5 소스(`mysqldump --databases … --set-gtid-purged=OFF`), Mongo(`mongodump --archive --gzip`), Ceph 버킷(rclone 파드 → tar), RGW 사용자 키(Secret), Dashboards 저장 객체(`/api/saved_objects/_export`) → `~/modu-data/backup/2026-10-06-colima/`.
 2. `colima start …` → `kubectl apply -f overlays/dev/storageclass.yaml` → `kubectl create ns modu` → `./create-infra-secret.sh` + Secret `config-service` → `kubectl apply -k overlays/dev` 하고 **앱 Deployment 17개는 replicas 0** 으로(인프라 먼저).
 3. Argo(`cicd/argocd`, 두 번), Ceph(`k8s/ceph`, 두 번; 그 전에 Secret `rgw-storage-service-keys` 를 백업 키로 만들면 RGW 사용자 키가 그대로라 config-repo 를 안 건드린다).
-4. MySQL 덤프 적재 → `sh data/mysql/replica-setup.sh all` → Mongo `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh` + `mongorestore --nsExclude 'admin.*'` → Ceph 버킷 rclone 파드로 복원 → Dashboards `_import`.
+4. MySQL 덤프 적재(덤프가 없는 새 DB 는 `sh data/mysql/apply-baseline.sh <instance>` 로 기준선만) → `sh data/mysql/replica-setup.sh all` → Mongo `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh` + `mongorestore --nsExclude 'admin.*'` → Ceph 버킷 rclone 파드로 복원 → Dashboards `_import`.
 5. `kubectl apply -k ~/workspace/modu_platform`(config-repo ConfigMap) → 앱을 config → gateway → 3개씩 순서로 replicas 1 → `colima-ports.sh` → Argo 세 Application Sync(입양) → Flip3 확인.
 
 **밟은 것**: ① Docker Desktop 을 "종료"해도 `com.docker.backend` 가 남아 8000·8090 을 잡고 있었다 — `pkill -f com.docker.backend`. ② Lima 는 "소켓으로 듣는" 게스트 포트만 포워딩하므로 k3s ServiceLB(iptables) 포트는 Mac 에 안 보인다 → `colima-ports.sh`. ③ kustomize 원격 URL(Argo 공식 매니페스트)은 이미지 받는 중엔 git fetch 가 27초 타임아웃에 걸린다 — 재시도. ④ VM 에는 `$HOME` 만 마운트돼 있어 `mktemp`(/var/folders)로 만든 파일을 `docker -v` 로 못 넘긴다. ⑤ Rook 이 만드는 Secret `rook-ceph-object-user-modu-storage-service` 의 키가 실제 RGW 사용자 키(고정한 값)와 달랐다 — 실제 키는 `radosgw-admin --rgw-realm=modu --rgw-zonegroup=modu --rgw-zone=modu user info --uid=storage-service`(operator 파드)로 본다. config-repo 는 고정한 키라 맞다.
@@ -159,7 +159,7 @@ Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커
 | 구성 요소 | 종류 | 이미지 | Service:포트 | PVC | 메모리 req / limit |
 |---|---|---|---|---|---|
 | mysql-{member,chat,push,profile} + `-replica` | STS ×8 | mysql:8.0.32 | :3306 | 2Gi | 384Mi / 768Mi |
-| mysql-platform | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 플랫폼 서비스용(2026-10-07): deploy-service 배포 이력 `modu-platform.deployment`. 소스(쓰기). 초기 스키마는 ConfigMap mysql-platform-init(빈 볼륨 첫 기동 때만), 계정 platform(PLATFORM_DB_*) |
+| mysql-platform | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 플랫폼 서비스용(2026-10-07): deploy-service 배포 이력 `modu-platform.deployment`. 소스(쓰기). 스키마는 새 클러스터면 `sh data/mysql/apply-baseline.sh platform` 으로 손으로(init 스크립트 없음), 계정 platform(PLATFORM_DB_*) |
 | mysql-platform-replica | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 레플리카(읽기, server-id 25, super_read_only). 복제·읽기 계정 platform_ro 는 `sh data/mysql/replica-setup.sh platform`(PLATFORM_REPL/RO_PASSWORD). deploy-service 의 이력 목록 조회가 여기로 |
 | mysql-commerce(-replica) | STS ×2 | mysql:8.0.44 | :3306 | 2Gi | 384Mi / 768Mi |
 | redis | STS | redis:7.2.4-alpine | :6379 | 256Mi | 32Mi / 128Mi |
