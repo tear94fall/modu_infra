@@ -50,7 +50,7 @@ images:
   - name: ghcr.io/tear94fall/modu-admin/modu-system
     newTag: develop-ab00955  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
   - name: ghcr.io/tear94fall/modu-admin/modu-internal
-    newTag: develop-cd6f7b3  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
+    newTag: develop-ab00955  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
 
 # 복제 수. 1 노드라 gateway·config 만 2(롤링 재배포 때 끊기지 않게), 나머지는 1.
 # 메모리 requests 합(JVM 14개×512Mi + nginx 4개×16Mi ≈ 7.1GiB)이 노드 allocatable 을 넘으면 Pending 이 된다 — Docker Desktop 메모리를 확인(README).
