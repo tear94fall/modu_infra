@@ -48,7 +48,7 @@ images:
   - name: ghcr.io/tear94fall/modu-admin/modu-admin
     newTag: develop-5884a31  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
   - name: ghcr.io/tear94fall/modu-admin/modu-system
-    newTag: develop-ab00955  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
+    newTag: develop-4ff47b6  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
   - name: ghcr.io/tear94fall/modu-admin/modu-internal
     newTag: develop-5884a31  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
 
