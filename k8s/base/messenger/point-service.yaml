@@ -41,6 +41,15 @@ spec:
         env:
         - name: CONFIG_SERVER_URI
           value: "http://config-service:8888"
+        # config-service 는 {cipher} 가 풀린 평문을 돌려주므로 인증을 요구한다. 설정을 받기 전이라 토큰은 config-repo 가 아니라
+        # Secret config-service(INTERNAL_API_TOKEN)에서 환경변수로 받아 Spring Cloud Config 클라이언트가 Basic 비밀번호로 보낸다.
+        - name: SPRING_CLOUD_CONFIG_USERNAME
+          value: "modu"
+        - name: SPRING_CLOUD_CONFIG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: config-service
+              key: INTERNAL_API_TOKEN
         - name: SPRING_DATASOURCE_MASTER_URL
           value: "jdbc:mysql://mysql-member:3306/modu-point"
         - name: SPRING_DATASOURCE_MASTER_USERNAME
