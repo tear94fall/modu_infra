@@ -14,23 +14,32 @@ NS=${NS:-modu}
 GHOST_PASSWORD=$(kubectl -n "$NS" get secret infra -o jsonpath='{.data.GHOST_PASSWORD}' | base64 -d)
 [ -n "$GHOST_PASSWORD" ] || { echo "Secret infra 에 GHOST_PASSWORD 가 없다(k8s/infra.env → create-infra-secret.sh)" >&2; exit 1; }
 
-grant() { # $1 instance  $2 스키마 패턴
-  kubectl -n "$NS" exec -i "mysql-$1-0" -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot' <<SQL
-CREATE USER IF NOT EXISTS 'ghost'@'%' IDENTIFIED WITH caching_sha2_password BY '${GHOST_PASSWORD}';
-ALTER USER 'ghost'@'%' IDENTIFIED WITH caching_sha2_password BY '${GHOST_PASSWORD}';
-GRANT ALTER, CREATE, DELETE, DROP, INDEX, INSERT, LOCK TABLES, SELECT, TRIGGER, UPDATE ON \`$2\`.* TO 'ghost'@'%';
-GRANT REPLICATION CLIENT, REPLICATION SLAVE ON *.* TO 'ghost'@'%';
--- cut-over 때 메타데이터 잠금(metadata_locks·threads)을 보고, mdl instrument 를 확인·활성화한다(gh-ost 1.1.9+)
-GRANT SELECT ON performance_schema.* TO 'ghost'@'%';
-GRANT UPDATE ON performance_schema.setup_instruments TO 'ghost'@'%';
-SQL
-  echo "== mysql-$1-0: ghost@% ($2)"
+# 스키마마다 정확한 이름으로 준다. gh-ost 는 SHOW GRANTS 에서 대상 스키마 이름을 그대로 찾기 때문에
+# 와일드카드(`modu-%`.*)로 주면 "user has insufficient privileges" 로 멈춘다.
+grant() { # $1 instance  $2.. 스키마 이름들
+  instance=$1; shift
+  schemas=$*
+  { echo "CREATE USER IF NOT EXISTS 'ghost'@'%' IDENTIFIED WITH caching_sha2_password BY '${GHOST_PASSWORD}';"
+    echo "ALTER USER 'ghost'@'%' IDENTIFIED WITH caching_sha2_password BY '${GHOST_PASSWORD}';"
+    for s in $schemas; do
+      echo "GRANT ALTER, CREATE, DELETE, DROP, INDEX, INSERT, LOCK TABLES, SELECT, TRIGGER, UPDATE ON \`$s\`.* TO 'ghost'@'%';"
+    done
+    echo "GRANT REPLICATION CLIENT, REPLICATION SLAVE ON *.* TO 'ghost'@'%';"
+    # cut-over 때 메타데이터 잠금(metadata_locks·threads)을 보고, mdl instrument 를 확인·활성화한다(gh-ost 1.1.9+)
+    echo "GRANT SELECT ON performance_schema.* TO 'ghost'@'%';"
+    echo "GRANT UPDATE ON performance_schema.setup_instruments TO 'ghost'@'%';"
+  } | kubectl -n "$NS" exec -i "mysql-$instance-0" -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot'
+  echo "== mysql-$instance-0: ghost@% ($schemas)"
 }
 
-for t in ${*:-member chat push profile commerce}; do
+for t in ${*:-member chat push profile commerce platform}; do
   case "$t" in
-    member|chat|push|profile) grant "$t" 'modu-%' ;;
-    commerce)                 grant commerce commerce ;;
-    *) echo "사용: sh data/mysql/ghost-user-setup.sh [member|chat|push|profile|commerce ...]" >&2; exit 2 ;;
+    member)   grant member 'modu-chat' 'modu-point' 'modu-schedule' ;;
+    chat)     grant chat 'modu-chat' ;;
+    push)     grant push 'modu-chat' ;;
+    profile)  grant profile 'modu-chat' ;;
+    commerce) grant commerce commerce ;;
+    platform) grant platform 'modu-platform' ;;
+    *) echo "사용: sh data/mysql/ghost-user-setup.sh [member|chat|push|profile|commerce|platform ...]" >&2; exit 2 ;;
   esac
 done

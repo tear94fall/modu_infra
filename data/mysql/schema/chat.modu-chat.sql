@@ -53,7 +53,9 @@ CREATE TABLE `chat_room` (
   `room_id` varchar(255) NOT NULL,
   `room_image` varchar(255) NOT NULL,
   `room_name` varchar(255) NOT NULL,
-  PRIMARY KEY (`chat_room_id`)
+  `member_key` char(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL,
+  PRIMARY KEY (`chat_room_id`),
+  UNIQUE KEY `uk_chat_room_member_key` (`member_key`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
