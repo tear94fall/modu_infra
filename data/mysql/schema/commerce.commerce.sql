@@ -227,8 +227,32 @@ CREATE TABLE `orders` (
   `earn_rate` int DEFAULT NULL,
   `earn_status` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'NONE',
   `earned_at` datetime(6) DEFAULT NULL,
+  `idempotency_key` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `UKg8pohnngqi5x1nask7nff2u7w` (`order_no`)
+  UNIQUE KEY `UKg8pohnngqi5x1nask7nff2u7w` (`order_no`),
+  UNIQUE KEY `uk_orders_user_idempotency` (`user_id`,`idempotency_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `point_outbox` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `kind` varchar(16) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `status` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `user_id` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `order_no` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `ref_id` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `amount` bigint NOT NULL,
+  `attempts` int NOT NULL DEFAULT '0',
+  `next_attempt_at` datetime(6) NOT NULL,
+  `last_error` varchar(300) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `done_at` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_point_outbox_kind_ref` (`kind`,`ref_id`),
+  KEY `idx_point_outbox_status_next` (`status`,`next_attempt_at`),
+  KEY `idx_point_outbox_order_no` (`order_no`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
