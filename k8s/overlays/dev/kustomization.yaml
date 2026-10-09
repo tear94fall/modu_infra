@@ -26,7 +26,7 @@ images:
   - name: ghcr.io/tear94fall/modu-chat/member-service
     newTag: develop
   - name: ghcr.io/tear94fall/modu-chat/chat-service
-    newTag: develop
+    newTag: develop-76c3b5c
   - name: ghcr.io/tear94fall/modu-chat/chat-store-service
     newTag: develop
   - name: ghcr.io/tear94fall/modu-chat/ws-service
