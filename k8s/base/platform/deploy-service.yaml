@@ -81,6 +81,14 @@ spec:
         env:
         - name: CONFIG_SERVER_URI
           value: "http://config-service:8888"
+        # GitHub App 비밀키. config-repo(공개)에 두지 않고 Secret deploy-service 에서만 온다. 시크릿이 없으면 비어 들어와
+        # 앱 자격을 쓰지 않는다(기동은 된다) — k8s/create-infra-secret.sh 가 k8s/deploy-github-app.pem 으로 만든다.
+        - name: DEPLOY_GITHUB_APP_PRIVATE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: deploy-service
+              key: GITHUB_APP_PRIVATE_KEY
+              optional: true
         # config-service 는 {cipher} 가 풀린 평문을 돌려주므로 인증을 요구한다. 설정을 받기 전이라 토큰은 config-repo 가 아니라
         # Secret config-service(INTERNAL_API_TOKEN)에서 환경변수로 받아 Spring Cloud Config 클라이언트가 Basic 비밀번호로 보낸다.
         - name: SPRING_CLOUD_CONFIG_USERNAME
