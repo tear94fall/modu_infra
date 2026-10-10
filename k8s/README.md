@@ -23,9 +23,10 @@ k8s/
   cicd/argocd/                       # Argo CD(v3.5.3) 설치 + Application 3개(modu-dev, modu-config-repo, modu-ceph) — 아래 "Argo CD 로 배포"
   ceph/                              # Rook-Ceph(RGW = S3, MinIO 대체) — 아래 "Ceph"
     secret.example.yaml              # Secret config-service 의 틀(값 비어 있음) — kustomization 에 없음
-  create-infra-secret.sh             # infra.env + mongodb.key → Secret infra, mongo-keyfile, mysqld-exporter
+  create-infra-secret.sh             # infra.env + mongodb.key + deploy-github-app.pem → Secret infra, mongo-keyfile, mysqld-exporter, deploy-service
   infra-secrets.example.env          # Secret infra 의 키 목록(값 비어 있음) — infra.env 로 복사해 채운다
   infra.env, mongodb.key             # (gitignored) Secret 의 원본 값·mongo keyFile
+  deploy-github-app.pem              # (gitignored) deploy-service 의 GitHub App 비밀키(PKCS#8 PEM) — 없으면 그 Secret 만 건너뛴다
 ```
 
 ## Colima (2026-10-06 부터)
@@ -99,8 +100,9 @@ set -a; source ~/workspace/modu_platform/.env; set +a
 kubectl -n modu create secret generic config-service \
   --from-literal=ENCRYPT_KEY="$ENCRYPT_KEY" --from-literal=INTERNAL_API_TOKEN="$INTERNAL_API_TOKEN"
 
-# 2) 인프라 Secret(infra, mongo-keyfile, mysqld-exporter) — k8s/infra.env + k8s/mongodb.key(둘 다 gitignored)에서. 다시 돌려도 된다(apply)
+# 2) 인프라 Secret(infra, mongo-keyfile, mysqld-exporter, deploy-service) — k8s/ 의 gitignored 원본 파일 3개에서. 다시 돌려도 된다(apply)
 cp infra-secrets.example.env infra.env && $EDITOR infra.env      # 처음 한 번: 23개 값 채우기(키마다 주석). mongodb.key 가 없으면 openssl rand -base64 756 > mongodb.key
+# GitHub App(배포 탭) 비밀키: GitHub 에서 받은 .pem 을 PKCS#8 로 바꿔 둔다 — openssl pkcs8 -topk8 -nocrypt -in <받은>.pem -out deploy-github-app.pem && chmod 600 deploy-github-app.pem
 ./create-infra-secret.sh
 
 # 3) Ceph(RGW) — 아래 "Ceph" 절(두 번 apply, 5~10분)
@@ -197,7 +199,7 @@ compose 와 다른 점(이유는 각 매니페스트 주석):
 - **prometheus** — 잡·대상 이름은 compose 의 `prometheus.yml` 그대로(ConfigMap `prometheus` 에 인라인. 대상이 이제 k8s Service). `node` 잡은 뺐고 `cadvisor` 잡은 kubelet cAdvisor(API 서버 프록시 `/api/v1/nodes/<node>/proxy/metrics/cadvisor`, ClusterRole `modu-prometheus`)로 바꿨다. 설정 바꾼 뒤 `kubectl -n modu exec prometheus-0 -- wget -qO- --post-data= http://localhost:9090/-/reload`.
 - **grafana** — provisioning 을 projected 볼륨으로 compose 와 같은 디렉터리 모양으로. 대시보드 JSON 은 `base/observability/grafana/dashboards/`(이제 유일한 사본) → configMapGenerator 2개(client-side apply 의 last-applied 주석 256KiB 한도 때문에 나눔). `node-exporter.json`(468KB, 데이터도 없음)은 뺐다(git 이력에만 있다).
 - **pinpoint** — batch·flink·quickstart·agent 는 compose 에서도 꺼져 있어 뺐다. ZooKeeper 는 `zoo1` 한 대(compose 는 zoo1..3) — HBase 의 `hbase-site.xml` 을 ConfigMap 으로 덮어 quorum 을 `zoo1` 로. **pinpoint-hbase 는 StatefulSet 이 아니라 Deployment + PVC**: HBase 는 자기 hostname 을 ZooKeeper 에 등록하는데 StatefulSet 은 hostname 을 `pinpoint-hbase-0`(아무도 못 푸는 이름)으로 강제한다 — Deployment 의 `hostname: pinpoint-hbase` = Service 이름. pinpoint-mysql 은 데이터 디렉터리가 비었을 때만 GitHub 에서 스키마를 받는다(compose 는 매 기동). 컬렉터 UDP 9995/9996 은 Service `pinpoint-collector-udp` 로 나눴다(같은 포트 번호 TCP+UDP 한 Service 는 client-side apply 가 패치를 못 만든다). 이미지 태그 `latest` 는 compose(.env `PINPOINT_VERSION=latest`) 그대로, `imagePullPolicy: IfNotPresent`.
-- **Secret** — 비밀은 전부 `secretKeyRef`(Secret `infra`, 키 = compose 시절 .env 변수 이름, pinpoint 것만 `PINPOINT_` 접두사), 매니페스트에 값 없음. 원본은 한 파일 **`k8s/infra.env`**(gitignored, 23개 키 — 틀과 키마다 뜻은 `infra-secrets.example.env`)와 **`k8s/mongodb.key`**(gitignored). `./create-infra-secret.sh` 가 `infra.env` 를 읽어(source 하지 않고 KEY=VALUE 줄만) `infra` 를, `mongodb.key` 로 `mongo-keyfile` 을, `infra.env` 의 `MYSQL_ROOT_PASSWORD`·`COMMERCE_DB_PASSWORD` 로 `.my.cnf`(`[client]`·`[client.commerce]`, root)를 만들어 `mysqld-exporter` 를 만든다. 매니페스트·운영 스크립트가 쓰는 키가 빠지면 실패한다. 값은 화면에 안 찍는다. 운영 스크립트(`data/mysql/*.sh` 등)도 같은 Secret 을 `kubectl get secret infra -o jsonpath` 로 읽는다.
+- **Secret** — 비밀은 전부 `secretKeyRef`(Secret `infra`, 키 = compose 시절 .env 변수 이름, pinpoint 것만 `PINPOINT_` 접두사), 매니페스트에 값 없음. 원본은 한 파일 **`k8s/infra.env`**(gitignored, 23개 키 — 틀과 키마다 뜻은 `infra-secrets.example.env`)와 **`k8s/mongodb.key`**·**`k8s/deploy-github-app.pem`**(gitignored). `./create-infra-secret.sh` 가 `infra.env` 를 읽어(source 하지 않고 KEY=VALUE 줄만) `infra` 를, `mongodb.key` 로 `mongo-keyfile` 을, `infra.env` 의 `MYSQL_ROOT_PASSWORD`·`COMMERCE_DB_PASSWORD` 로 `.my.cnf`(`[client]`·`[client.commerce]`, root)를 만들어 `mysqld-exporter` 를, `deploy-github-app.pem`(있을 때만) 으로 `deploy-service`(키 `GITHUB_APP_PRIVATE_KEY` → 환경변수 `DEPLOY_GITHUB_APP_PRIVATE_KEY`)를 만든다. GitHub App 비밀키는 config-repo 가 공개 저장소라 `{cipher}` 로도 두지 않고 이 Secret 에만 둔다. 매니페스트·운영 스크립트가 쓰는 키가 빠지면 실패한다. 값은 화면에 안 찍는다. 운영 스크립트(`data/mysql/*.sh` 등)도 같은 Secret 을 `kubectl get secret infra -o jsonpath` 로 읽는다.
 
 ### 처음 옮길 때 순서
 
@@ -305,7 +307,7 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 - **수동 Sync(버튼)**. 머지해도 자동으로 적용되지 않는다 — UI 의 Sync 또는 API(`POST /api/v1/applications/<app>/sync`). Argo 의 self-heal(손으로 바꾼 걸 Git 으로 되돌림)은 자동 동기화의 하위 옵션이라 수동 모드엔 없다. `kubectl` 로 바꾸면 UI 에 OutOfSync 로 보인다.
 - **prune 없음**. Git 에서 지운 객체는 자동으로 안 지운다(UI 에서 확인 후 Sync 창의 Prune 체크).
 - **sync-wave**: JVM Deployment 13개는 base 의 annotation `argocd.argoproj.io/sync-wave` 1(config)…13(commerce). Argo 는 앞 wave 가 Healthy 가 돼야 다음을 적용하므로 공통 패치를 바꿔도 한 번에 하나씩 롤아웃된다(JVM 26개 OOM 사고 재발 방지). 인프라·nginx 는 0(기본, 가장 먼저).
-- **Argo 가 안 건드리는 것**: Secret 4개(`config-service`·`infra`·`mongo-keyfile`·`mysqld-exporter` — Git 에 없음, `create-infra-secret.sh`), Argo 자신. 추적은 annotation `argocd.argoproj.io/tracking-id`(라벨 방식 아님).
+- **Argo 가 안 건드리는 것**: Secret 5개(`config-service`·`infra`·`mongo-keyfile`·`mysqld-exporter`·`deploy-service` — Git 에 없음, `create-infra-secret.sh`), Argo 자신. 추적은 annotation `argocd.argoproj.io/tracking-id`(라벨 방식 아님).
 - **ApplyOutOfSyncOnly**: 바뀐 객체만 apply. 완료된 Job(`redis-cluster-init`)은 `spec` 비교 제외.
 - 뺀 컴포넌트: dex(SSO)·notifications·applicationset 은 replicas 0. 메모리 limits 합 ≈ 1.1GiB(Pinpoint 를 끄며 비운 자리).
 

@@ -1,6 +1,7 @@
 # 시크릿 — Secret infra·mongo-keyfile·mysqld-exporter 의 원본(k8s/create-infra-secret.sh 가 읽는다). 틀은 k8s/infra-secrets.example.env
 k8s/infra.env
 k8s/mongodb.key
+k8s/deploy-github-app.pem
 **/.env
 
 # 로컬 백업 파일

@@ -15,7 +15,7 @@ compose 구성(`data/docker-compose.yml`, `monitoring/`, `pinpoint-docker/`)은 
 
 | 디렉터리 | 내용 |
 |---|---|
-| `k8s/` | Kustomize 매니페스트 — `base/{platform,messenger,commerce,admin}` 앱 17개, `base/data`(MySQL 10 + 플랫폼용 mysql-platform(+replica), Redis, Redis 클러스터 6, ZooKeeper·Kafka·Debezium·kafka-ui, Mongo 3, MinIO, RabbitMQ), `base/observability`(OpenSearch·Dashboards, Prometheus·Grafana·exporter, Pinpoint, OTel Collector), `overlays/dev`, `cicd/argocd`(Argo CD + Application 2개 — dev 배포는 Argo Sync 로). Secret 의 원본은 `k8s/infra.env`·`k8s/mongodb.key`(gitignored, 틀은 `k8s/infra-secrets.example.env`) |
+| `k8s/` | Kustomize 매니페스트 — `base/{platform,messenger,commerce,admin}` 앱 17개, `base/data`(MySQL 10 + 플랫폼용 mysql-platform(+replica), Redis, Redis 클러스터 6, ZooKeeper·Kafka·Debezium·kafka-ui, Mongo 3, MinIO, RabbitMQ), `base/observability`(OpenSearch·Dashboards, Prometheus·Grafana·exporter, Pinpoint, OTel Collector), `overlays/dev`, `cicd/argocd`(Argo CD + Application 2개 — dev 배포는 Argo Sync 로). Secret 의 원본은 `k8s/infra.env`·`k8s/mongodb.key`·`k8s/deploy-github-app.pem`(gitignored, 틀은 `k8s/infra-secrets.example.env`) |
 | `data/mysql/` | 스키마 기준선·변경 이력·gh-ost·DBA 절차 + k8s 운영 스크립트(복제 설정, gh-ost, 기준선 덤프·새 클러스터 기준선 적용, 고아 행 점검). 아래 "스키마 관리"·"운영 스크립트" |
 | `data/mysql-commerce/` | `replica-setup.sh` — 커머스 복제 설정(공통 스크립트를 `commerce` 로 부르는 껍데기) |
 | `data/kafka/` | 토픽 생성·조회·삭제 — `kubectl -n modu exec kafka-0 -- kafka-topics …` |
@@ -29,7 +29,7 @@ cd k8s
 kubectl apply -f base/namespace.yaml
 kubectl -n modu create secret generic config-service --from-literal=ENCRYPT_KEY=… --from-literal=INTERNAL_API_TOKEN=…   # modu_platform/.env 의 값
 cp infra-secrets.example.env infra.env && $EDITOR infra.env   # 값 채우기(처음 한 번). mongodb.key 도 옆에(없으면 openssl rand -base64 756 > mongodb.key)
-./create-infra-secret.sh                      # k8s/infra.env + k8s/mongodb.key → Secret infra·mongo-keyfile·mysqld-exporter
+./create-infra-secret.sh                      # k8s/infra.env + k8s/mongodb.key + k8s/deploy-github-app.pem → Secret infra·mongo-keyfile·mysqld-exporter·deploy-service
 overlays/dev/gen-config-repo-configmaps.sh    # modu_platform/config-repo → ConfigMap
 kubectl apply --server-side -k ceph && kubectl apply --server-side -k ceph    # Ceph(RGW = S3) — CRD 뒤에 CephCluster, 두 번
 kubectl apply -k overlays/dev

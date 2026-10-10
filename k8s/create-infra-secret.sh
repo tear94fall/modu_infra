@@ -2,6 +2,7 @@
 # 인프라(base/data, base/observability)가 읽는 Secret 3개를 k8s/infra.env + k8s/mongodb.key 에서 만든다(있으면 덮어쓴다 — apply).
 #   infra            k8s/infra.env 의 KEY=VALUE 전부(23개. 키 목록·뜻은 infra-secrets.example.env)
 #   mongo-keyfile    k8s/mongodb.key                   (mongo 의 replica set 내부 인증 키, 1024B)
+#   deploy-service   k8s/deploy-github-app.pem        (GitHub App 비밀키 — 없으면 건너뛴다)
 #   mysqld-exporter  .my.cnf — infra.env 의 MYSQL_ROOT_PASSWORD([client], 메신저 root)·COMMERCE_DB_PASSWORD([client.commerce], 커머스 root)로 만든다
 # 두 파일은 gitignored. 처음이면 infra-secrets.example.env 를 infra.env 로 복사해 값을 채운다(값은 compose 시절 data/.env·monitoring/.env·pinpoint-docker/.env 를 2026-10-04 에 합친 것).
 #
@@ -15,6 +16,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 NS=${NS:-modu}
 INFRA_ENV="${INFRA_ENV:-$HERE/infra.env}"
 MONGO_KEY="${MONGO_KEY:-$HERE/mongodb.key}"
+APP_KEY="${APP_KEY:-$HERE/deploy-github-app.pem}"   # deploy-service 의 GitHub App 비밀키(PKCS#8 PEM, gitignored)
 
 for f in "$INFRA_ENV" "$MONGO_KEY"; do
   [ -r "$f" ] || { echo "읽을 수 없다: $f  (infra-secrets.example.env 를 보고 만든다)" >&2; exit 1; }
@@ -84,4 +86,14 @@ kubectl apply -f "$HERE/base/namespace.yaml" >/dev/null
 kubectl -n "$NS" create secret generic infra "${ARGS[@]}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$NS" create secret generic mongo-keyfile --from-file=mongodb.key="$MONGO_KEY" --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n "$NS" create secret generic mysqld-exporter --from-file=.my.cnf="$MY_CNF" --dry-run=client -o yaml | kubectl apply -f -
+
+# deploy-service 의 GitHub App 비밀키. config-repo 는 공개 저장소라 {cipher} 로도 두지 않는다 — 여기 Secret 에만 둔다.
+# 파일은 PKCS#8 PEM(원본이 PKCS#1 이면 openssl pkcs8 -topk8 -nocrypt -in app.pem -out "$APP_KEY"). 없으면 건너뛴다
+# (앱 자격 없이 뜨고, 배포 탭의 쓰기만 안 된다 — DeployProperties.App.enabled).
+if [ -r "$APP_KEY" ]; then
+  kubectl -n "$NS" create secret generic deploy-service --from-file=GITHUB_APP_PRIVATE_KEY="$APP_KEY" --dry-run=client -o yaml | kubectl apply -f -
+  echo "deploy-service: GitHub App 비밀키 반영"
+else
+  echo "deploy-service: $APP_KEY 가 없어 건너뛴다(배포 탭 쓰기 불가)" >&2
+fi
 echo "Secret infra 키($(( $(echo "$KEYS" | wc -w) )))개:$KEYS"
