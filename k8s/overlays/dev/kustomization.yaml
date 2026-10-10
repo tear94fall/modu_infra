@@ -16,7 +16,7 @@ resources:
 # 이미지 태그. base 는 develop(브랜치 롤링 태그). CI 가 올린 태그(예: sha-…)로 바꿔 apply 하면 그 Deployment 만 롤아웃된다.
 images:
   - name: ghcr.io/tear94fall/modu-platform/config-service
-    newTag: develop
+    newTag: develop-bc160d5
   - name: ghcr.io/tear94fall/modu-platform/gateway-service
     newTag: develop-e32b2e5
   - name: ghcr.io/tear94fall/modu-platform/deploy-service
