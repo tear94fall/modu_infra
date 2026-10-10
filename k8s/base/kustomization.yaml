@@ -36,3 +36,4 @@ resources:
   - admin/modu-internal.yaml
   - data
   - observability
+  - backup

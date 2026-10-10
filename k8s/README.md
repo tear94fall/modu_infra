@@ -12,8 +12,9 @@ k8s/
     commerce/   commerce-service.yaml web.yaml
     admin/      modu-admin.yaml modu-system.yaml modu-internal.yaml
     data/       mysql.yaml(10) mysql-platform.yaml(deploy-service 이력 DB, 소스+레플리카) redis.yaml redis-cluster.yaml(6 + init Job) kafka.yaml(zookeeper·kafka·debezium·kafka-ui) mongo.yaml(3) rgw.yaml(ExternalName → ceph/) rabbitmq.yaml
-    observability/  opensearch.yaml(+dashboards) otel-collector.yaml(파드 로그 DaemonSet) prometheus.yaml(+RBAC) grafana.yaml(+grafana/dashboards/*.json)
+    observability/  opensearch.yaml(+dashboards) opensearch-ism.yaml(로그 수명 관리 Job) otel-collector.yaml(파드 로그 DaemonSet) prometheus.yaml(+RBAC) grafana.yaml(+grafana/dashboards/*.json)
                     exporters.yaml(mysqld·redis·mongodb·kafka) pinpoint.yaml(hbase·mysql·redis·zoo1·collector·web)
+    backup/     mysql.yaml(덤프+binlog) mongo.yaml prune.yaml — 매일 맥 디스크로. 경로는 오버레이가 패치. RGW 는 ceph/backup.yaml. 절차는 BACKUP.md
   overlays/dev/
     kustomization.yaml               # images(태그), replicas, 아래 생성 파일
     loadbalancers.yaml               # Mac 에서 들어오는 입구: 앱 6개 + 인프라 UI 8개(compose 와 같은 호스트 포트)
@@ -21,8 +22,10 @@ k8s/
     colima-ports.sh                  # LB 포트를 Mac(localhost·LAN IP)으로 내보내는 nginx(stream) 컨테이너
     pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS) — dev 는 2026-10-04 부터 꺼 둠(아래 "Pinpoint 켜기/끄기")
   cicd/argocd/                       # Argo CD(v3.5.3) 설치 + Application 3개(modu-dev, modu-config-repo, modu-ceph) — 아래 "Argo CD 로 배포"
-  ceph/                              # Rook-Ceph(RGW = S3, MinIO 대체) — 아래 "Ceph"
+  ceph/                              # Rook-Ceph(RGW = S3, MinIO 대체) + backup.yaml(버킷 사본 CronJob) — 아래 "Ceph"
     secret.example.yaml              # Secret config-service 의 틀(값 비어 있음) — kustomization 에 없음
+  BACKUP.md                          # 백업·복구 런북(CronJob 4개, 복원 절차, 비밀값 아카이브, 확인 기록)
+  secrets-archive.sh                 # Git 에 없는 비밀값 4개(+RGW 키)를 암호화 아카이브 하나로 — BACKUP.md "비밀값"
   create-infra-secret.sh             # infra.env + mongodb.key + deploy-github-app.pem → Secret infra, mongo-keyfile, mysqld-exporter, deploy-service
   infra-secrets.example.env          # Secret infra 의 키 목록(값 비어 있음) — infra.env 로 복사해 채운다
   infra.env, mongodb.key             # (gitignored) Secret 의 원본 값·mongo keyFile
@@ -195,6 +198,7 @@ compose 와 다른 점(이유는 각 매니페스트 주석):
 - **redis 클러스터** — compose 의 고정 IP(10.90.0.11~16) 대신 노드마다 ClusterIP Service 를 두고 그 IP 를 `--cluster-announce-ip` 로 광고(파드가 재시작해도 nodes.conf 의 IP 가 맞는다). 클라이언트에는 호스트 이름 `redis-node-N` 을 광고. 클러스터 생성은 compose 의 redis-node-1 자체 부트스트랩 대신 Job `redis-cluster-init`(6노드 PONG → 슬롯 0 일 때만 create). **redis-node Service 를 지웠다 다시 만들면 ClusterIP 가 바뀌어 클러스터가 깨진다.**
 - **mongo** — keyFile 은 Secret `mongo-keyfile` 을 init 컨테이너가 emptyDir 로 복사해 `chown 999:999 && chmod 400`. replica set 최초 구성: `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh`(ConfigMap `mongo-rs-init`).
 - **rabbitmq** — 데이터가 노드 이름 `rabbit@rabbitmq` 에 묶여 있어(compose `hostname: rabbitmq`) `RABBITMQ_NODENAME=rabbit@rabbitmq` + `hostAliases`(rabbitmq → 127.0.0.1). StatefulSet 파드의 hostname 은 `rabbitmq-0` 으로 강제된다.
+- **opensearch** — 로그 인덱스는 **별칭 + 롤오버**다: 컬렉터는 그대로 `modu-app-logs`·`modu-infra-logs` 로 쓰고, 그 이름이 별칭이며 실제 인덱스는 `-000001`, `-000002`… ISM 정책 `modu-logs` 가 1일(또는 주 샤드 5GB)마다 롤오버하고 14일 뒤 삭제한다. 단일 노드라 복제본은 0(그래야 health 가 green 이 된다 — 전에는 영구 yellow 였다). 정책·템플릿·첫 별칭은 Job `opensearch-ism-init`(`base/observability/opensearch-ism.yaml`, 멱등)이 만든다. 옛 고정 인덱스가 있으면 reindex 해서 옮기고 지운다.
 - **opensearch** — `ulimits memlock` 은 뺐다(memory_lock 을 안 켬). `vm.max_map_count` 는 노드 = Docker VM 커널 값 그대로(compose 의 opensearch 가 같은 커널에서 돌았다), sysctl init 컨테이너 없음.
 - **prometheus** — 잡·대상 이름은 compose 의 `prometheus.yml` 그대로(ConfigMap `prometheus` 에 인라인. 대상이 이제 k8s Service). `node` 잡은 뺐고 `cadvisor` 잡은 kubelet cAdvisor(API 서버 프록시 `/api/v1/nodes/<node>/proxy/metrics/cadvisor`, ClusterRole `modu-prometheus`)로 바꿨다. 설정 바꾼 뒤 `kubectl -n modu exec prometheus-0 -- wget -qO- --post-data= http://localhost:9090/-/reload`.
 - **grafana** — provisioning 을 projected 볼륨으로 compose 와 같은 디렉터리 모양으로. 대시보드 JSON 은 `base/observability/grafana/dashboards/`(이제 유일한 사본) → configMapGenerator 2개(client-side apply 의 last-applied 주석 256KiB 한도 때문에 나눔). `node-exporter.json`(468KB, 데이터도 없음)은 뺐다(git 이력에만 있다).

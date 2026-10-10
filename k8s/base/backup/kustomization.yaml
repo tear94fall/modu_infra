@@ -1,0 +1,9 @@
+# 백업 CronJob 3개(MySQL 덤프+binlog, Mongo 덤프, 보관 기간 정리). Ceph(RGW) 버킷 사본은 자격이 있는
+# rook-ceph 네임스페이스에 있다(k8s/ceph/backup.yaml). 쓰는 경로(hostPath)는 오버레이가 정한다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - mysql.yaml
+  - mongo.yaml
+  - prune.yaml

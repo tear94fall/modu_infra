@@ -1,0 +1,107 @@
+# MySQL 6개 인스턴스의 야간 논리 백업 + binlog 사본(시점 복구용).
+# - 덤프는 **레플리카**에서 뜬다(소스에 부하를 주지 않는다). --single-transaction 이라 일관된 스냅샷이다.
+# - --set-gtid-purged=COMMENTED: 덤프 시점의 GTID 를 주석으로 남긴다(복원은 그냥 되고, 시점 복구의 시작점을 알 수 있다).
+# - binlog 는 **소스**에서 mysqlbinlog --raw 로 받아 둔다. 인스턴스 PVC 에만 있던 7일치를 VM 밖으로 옮기는 게 목적이다.
+# - 쓰는 곳은 hostPath(오버레이에서 정한다) — PVC(local-path)는 `colima delete` 로 같이 사라져서 백업이 아니다.
+# 복구 절차는 k8s/BACKUP.md.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-mysql
+  labels:
+    app: backup-mysql
+    app.kubernetes.io/name: backup-mysql
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "10 3 * * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
+  # 맥이 자고 있어 3시 10분을 놓쳤으면 깨어난 뒤 12시간 안에는 한 번 돈다(그 뒤면 건너뛰고 다음 밤을 기다린다).
+  startingDeadlineSeconds: 43200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: backup-mysql
+            app.kubernetes.io/name: backup-mysql
+            app.kubernetes.io/component: backup
+        spec:
+          enableServiceLinks: false
+          restartPolicy: Never
+          containers:
+          - name: dump
+            # debian 변종이어야 한다 — 기본(oraclelinux) 이미지에는 mysqlbinlog 가 없다(mysqldump·mysql 만 있다).
+            image: mysql:8.0.32-debian
+            imagePullPolicy: IfNotPresent
+            env:
+            # 컨테이너 시계는 UTC 라 날짜 디렉터리가 하루 밀린다(03:10 KST = 전날 18:10 UTC). 스케줄과 같은 시간대로 맞춘다.
+            - name: TZ
+              value: Asia/Seoul
+            - name: MESSENGER_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: infra, key: MYSQL_ROOT_PASSWORD}
+            - name: COMMERCE_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: infra, key: COMMERCE_DB_PASSWORD}
+            - name: PLATFORM_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: infra, key: PLATFORM_DB_PASSWORD}
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              set -eu
+              OUT="/backup/$(date +%Y-%m-%d)"
+              mkdir -p "$OUT"
+
+              dump() {   # 이름 레플리카호스트 비밀번호 스키마...
+                name=$1; host=$2; pw=$3; shift 3
+                echo "▶ dump $name ($*)"
+                MYSQL_PWD="$pw" mysqldump -h "$host" -uroot \
+                  --single-transaction --quick --routines --events --triggers --hex-blob \
+                  --set-gtid-purged=COMMENTED --databases "$@" | gzip -6 > "$OUT/mysql-$name.sql.gz.part"
+                mv "$OUT/mysql-$name.sql.gz.part" "$OUT/mysql-$name.sql.gz"   # 중간에 죽으면 .part 로 남아 완성본과 구별된다
+              }
+
+              binlogs() {   # 이름 소스호스트 비밀번호 — 보관 중인 binlog 전부(수 MB)
+                name=$1; host=$2; pw=$3
+                mkdir -p "$OUT/binlog-$name"
+                first=$(MYSQL_PWD="$pw" mysql -h "$host" -uroot -N -e 'show binary logs' | awk 'NR==1{print $1}')
+                [ -n "$first" ] || { echo "  binlog 없음 ($name)"; return 0; }
+                echo "▶ binlog $name ($first 부터)"
+                MYSQL_PWD="$pw" mysqlbinlog -h "$host" -uroot --read-from-remote-server --raw \
+                  --result-file="$OUT/binlog-$name/" --to-last-log "$first"
+              }
+
+              dump member   mysql-member-replica   "$MESSENGER_ROOT_PASSWORD" modu-chat modu-point modu-schedule
+              dump chat     mysql-chat-replica     "$MESSENGER_ROOT_PASSWORD" modu-chat
+              dump push     mysql-push-replica     "$MESSENGER_ROOT_PASSWORD" modu-chat
+              dump profile  mysql-profile-replica  "$MESSENGER_ROOT_PASSWORD" modu-chat
+              dump commerce mysql-commerce-replica "$COMMERCE_ROOT_PASSWORD"  commerce
+              dump platform mysql-platform-replica "$PLATFORM_ROOT_PASSWORD"  modu-platform
+
+              binlogs member   mysql-member   "$MESSENGER_ROOT_PASSWORD"
+              binlogs chat     mysql-chat     "$MESSENGER_ROOT_PASSWORD"
+              binlogs push     mysql-push     "$MESSENGER_ROOT_PASSWORD"
+              binlogs profile  mysql-profile  "$MESSENGER_ROOT_PASSWORD"
+              binlogs commerce mysql-commerce "$COMMERCE_ROOT_PASSWORD"
+              binlogs platform mysql-platform "$PLATFORM_ROOT_PASSWORD"
+
+              # 복원 때 길잡이가 되도록 눈에 보이는 목록을 남긴다
+              ls -l "$OUT" | sed 's/^/  /'
+              du -sh "$OUT" | sed 's/^/  합계 /'
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+            resources:
+              requests: {memory: 64Mi, cpu: 20m}
+              limits: {memory: 256Mi}
+          volumes:
+          - name: backup
+            hostPath:
+              # 오버레이가 환경에 맞게 바꾼다(dev = 맥의 ~/modu-data/backup/auto, virtiofs 로 VM 에 쓰기 가능하게 붙어 있다).
+              path: /var/lib/modu-backup
+              type: DirectoryOrCreate

@@ -17,6 +17,7 @@ resources:
   - cluster.yaml
   - objectstore.yaml
   - loadbalancers.yaml
+  - backup.yaml      # 버킷 사본 CronJob(맥 디스크로) — k8s/BACKUP.md
 
 patches:
   # CRD 중 cephclusters 가 300KB 를 넘어 client-side apply(annotation 256KB 한도)가 안 된다 — Argo 가 server-side 로 적용하게.

@@ -1,0 +1,78 @@
+# RGW(S3) 버킷 사본을 맥 디스크로. 여기(rook-ceph)에 두는 이유: 버킷 자격이 이 네임스페이스의 Secret
+# rook-ceph-object-user-modu-storage-service(Rook 이 CephObjectStoreUser 로 만든다)에만 있다 — modu 로 복사하지 않는다.
+# `rclone copy`(sync 가 아니다) = 지워진 객체는 사본에 남는다. 업로드된 파일은 바뀌지 않으므로 날짜별 사본 대신 누적 미러 하나로 둔다.
+# OSD 가 loop 파일(10GiB) 하나라 Ceph 자체는 이중화가 없다 — 이 사본이 사실상 유일한 보호 장치다.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-rgw
+  namespace: rook-ceph
+  labels:
+    app: backup-rgw
+    app.kubernetes.io/name: backup-rgw
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "40 3 * * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 43200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: backup-rgw
+            app.kubernetes.io/name: backup-rgw
+            app.kubernetes.io/component: backup
+        spec:
+          enableServiceLinks: false
+          restartPolicy: Never
+          containers:
+          - name: rclone
+            image: rclone/rclone:1.68.2
+            imagePullPolicy: IfNotPresent
+            env:
+            # 컨테이너 시계는 UTC 라 날짜 디렉터리가 하루 밀린다(03:10 KST = 전날 18:10 UTC). 스케줄과 같은 시간대로 맞춘다.
+            - name: TZ
+              value: Asia/Seoul
+            - name: RCLONE_CONFIG_RGW_TYPE
+              value: s3
+            - name: RCLONE_CONFIG_RGW_PROVIDER
+              value: Ceph
+            - name: RCLONE_CONFIG_RGW_ENDPOINT
+              value: http://rook-ceph-rgw-modu.rook-ceph.svc:80
+            - name: RCLONE_CONFIG_RGW_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef: {name: rgw-storage-service-keys, key: AccessKey}
+            - name: RCLONE_CONFIG_RGW_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef: {name: rgw-storage-service-keys, key: SecretKey}
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              set -eu
+              echo "▶ 버킷 목록"
+              buckets=$(rclone lsd rgw: 2>/dev/null | awk '{print $NF}')
+              # 사용자에게 list-buckets 권한이 없으면 목록이 빈다 — 앱이 쓰는 버킷 이름을 기본값으로 둔다(config-repo storage-service.s3.bucket).
+              [ -n "$buckets" ] || buckets="file-storage"
+              echo "  $buckets"
+              for b in $buckets; do
+                echo "▶ copy $b → /backup/rgw/$b"
+                rclone copy "rgw:$b" "/backup/rgw/$b" --s3-no-check-bucket --stats-one-line --stats 0
+              done
+              du -sh /backup/rgw | sed 's/^/  합계 /'
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+            resources:
+              requests: {memory: 64Mi, cpu: 20m}
+              limits: {memory: 256Mi}
+          volumes:
+          - name: backup
+            hostPath:
+              # dev 전용 경로(맥의 홈이 virtiofs 로 붙어 있다). k8s/ceph 는 오버레이가 없어 여기 직접 적는다.
+              path: /Users/imjunseob/modu-data/backup/auto
+              type: DirectoryOrCreate

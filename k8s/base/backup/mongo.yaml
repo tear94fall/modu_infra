@@ -1,0 +1,62 @@
+# Mongo(chat-store 의 채팅 본문) 야간 백업. 레플리카 셋에서 세컨더리를 읽어 archive+gzip 한 파일로 뜬다.
+# URI 는 Secret infra 의 MONGODB_URI(자격 포함) 그대로 쓰고, readPreference 만 secondary 로 덧붙인다.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-mongo
+  labels:
+    app: backup-mongo
+    app.kubernetes.io/name: backup-mongo
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "25 3 * * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 43200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: backup-mongo
+            app.kubernetes.io/name: backup-mongo
+            app.kubernetes.io/component: backup
+        spec:
+          enableServiceLinks: false
+          restartPolicy: Never
+          containers:
+          - name: dump
+            image: mongo:7.0.8
+            imagePullPolicy: IfNotPresent
+            env:
+            # 컨테이너 시계는 UTC 라 날짜 디렉터리가 하루 밀린다(03:10 KST = 전날 18:10 UTC). 스케줄과 같은 시간대로 맞춘다.
+            - name: TZ
+              value: Asia/Seoul
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef: {name: infra, key: MONGODB_URI}
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              set -eu
+              OUT="/backup/$(date +%Y-%m-%d)"
+              mkdir -p "$OUT"
+              case "$MONGODB_URI" in *\?*) URI="$MONGODB_URI&readPreference=secondary";; *) URI="$MONGODB_URI?readPreference=secondary";; esac
+              echo "▶ mongodump (archive+gzip)"
+              mongodump --uri="$URI" --archive="$OUT/mongo.archive.gz.part" --gzip --quiet
+              mv "$OUT/mongo.archive.gz.part" "$OUT/mongo.archive.gz"
+              ls -l "$OUT/mongo.archive.gz" | sed 's/^/  /'
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+            resources:
+              requests: {memory: 64Mi, cpu: 20m}
+              limits: {memory: 256Mi}
+          volumes:
+          - name: backup
+            hostPath:
+              path: /var/lib/modu-backup
+              type: DirectoryOrCreate

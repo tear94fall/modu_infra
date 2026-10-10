@@ -13,6 +13,13 @@ resources:
   - loadbalancers.yaml
   - storageclass.yaml     # Colima(k3s)용 StorageClass `standard` (2026-10-06)
 
+# 백업 CronJob 3개가 쓰는 경로를 맥 디스크로(base 는 /var/lib/modu-backup 자리표시자). 주석은 backup-path-patch.yaml.
+patches:
+  - path: backup-path-patch.yaml
+    target:
+      kind: CronJob
+      name: "backup-(mysql|mongo|prune)"
+
 # 이미지 태그. base 는 develop(브랜치 롤링 태그). CI 가 올린 태그(예: sha-…)로 바꿔 apply 하면 그 Deployment 만 롤아웃된다.
 images:
   - name: ghcr.io/tear94fall/modu-platform/config-service

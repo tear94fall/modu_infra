@@ -1,0 +1,58 @@
+# 보관 기간. 날짜 디렉터리(YYYY-MM-DD)만 보고 14일이 지난 것을 지운다 — 백업이 디스크를 다 먹지 않게.
+# RGW 사본(rgw/)은 날짜 디렉터리가 아니라 누적 미러라서 건드리지 않는다(k8s/ceph/backup.yaml 참고).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-prune
+  labels:
+    app: backup-prune
+    app.kubernetes.io/name: backup-prune
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "10 4 * * *"
+  timeZone: Asia/Seoul
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 43200
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: backup-prune
+            app.kubernetes.io/name: backup-prune
+            app.kubernetes.io/component: backup
+        spec:
+          enableServiceLinks: false
+          restartPolicy: Never
+          containers:
+          - name: prune
+            image: busybox:1.36
+            imagePullPolicy: IfNotPresent
+            env:
+            # 컨테이너 시계는 UTC 라 날짜 디렉터리가 하루 밀린다(03:10 KST = 전날 18:10 UTC). 스케줄과 같은 시간대로 맞춘다.
+            - name: TZ
+              value: Asia/Seoul
+            command: ["/bin/sh", "-c"]
+            args:
+            - |
+              set -eu
+              KEEP_DAYS=14
+              echo "▶ $KEEP_DAYS 일 지난 백업 삭제"
+              find /backup -maxdepth 1 -type d -name '20??-??-??' -mtime "+$KEEP_DAYS" -print -exec rm -rf {} +
+              echo "▶ 남은 백업"
+              ls -1 /backup | sed 's/^/  /'
+              du -sh /backup | sed 's/^/  합계 /'
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+            resources:
+              requests: {memory: 16Mi, cpu: 10m}
+              limits: {memory: 64Mi}
+          volumes:
+          - name: backup
+            hostPath:
+              path: /var/lib/modu-backup
+              type: DirectoryOrCreate

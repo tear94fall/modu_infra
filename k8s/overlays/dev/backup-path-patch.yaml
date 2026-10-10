@@ -1,0 +1,5 @@
+# 백업을 **맥 디스크**에 쓴다. Colima VM 은 맥의 홈을 virtiofs 로 rw 마운트하고(VM 안 root 로 쓴 파일이 맥에서는 uid 501 로 보인다),
+# 이 경로는 `colima delete` 로도 사라지지 않는다. PVC(local-path)에 쓰면 VM 과 함께 날아가므로 백업이 아니다.
+- op: replace
+  path: /spec/jobTemplate/spec/template/spec/volumes/0/hostPath/path
+  value: /Users/imjunseob/modu-data/backup/auto
