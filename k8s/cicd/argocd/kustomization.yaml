@@ -60,9 +60,11 @@ patches:
         name: argocd-rbac-cm
       data:
         policy.default: ""
+        # 배포 탭이 쓰는 Application 하나만 지정한다 — default/* 로 두면 이 토큰으로 modu-ceph(스토리지)·modu-config-repo(설정)까지
+        # sync 할 수 있다. AppProject 는 default 하나뿐이라 프로젝트로 가르는 대신 이름으로 좁힌다.
         policy.csv: |
-          p, role:deployer, applications, get, default/*, allow
-          p, role:deployer, applications, sync, default/*, allow
+          p, role:deployer, applications, get, default/modu-dev, allow
+          p, role:deployer, applications, sync, default/modu-dev, allow
           g, deploy, role:deployer
   - target: {kind: Deployment, name: argocd-dex-server}
     patch: |-

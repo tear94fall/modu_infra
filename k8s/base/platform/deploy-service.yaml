@@ -89,6 +89,13 @@ spec:
               name: deploy-service
               key: GITHUB_APP_PRIVATE_KEY
               optional: true
+        # Argo CD 로컬 계정 deploy 의 API 토큰. 역시 공개 저장소에 두지 않는다(권한은 modu-dev 의 get·sync 뿐 — cicd/argocd 의 argocd-rbac-cm).
+        - name: DEPLOY_ARGOCD_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: deploy-service
+              key: ARGOCD_TOKEN
+              optional: true
         # config-service 는 {cipher} 가 풀린 평문을 돌려주므로 인증을 요구한다. 설정을 받기 전이라 토큰은 config-repo 가 아니라
         # Secret config-service(INTERNAL_API_TOKEN)에서 환경변수로 받아 Spring Cloud Config 클라이언트가 Basic 비밀번호로 보낸다.
         - name: SPRING_CLOUD_CONFIG_USERNAME
