@@ -20,7 +20,7 @@ images:
   - name: ghcr.io/tear94fall/modu-platform/gateway-service
     newTag: develop-e32b2e5
   - name: ghcr.io/tear94fall/modu-platform/deploy-service
-    newTag: develop-cb59df3
+    newTag: develop-fa29432
   - name: ghcr.io/tear94fall/modu-chat/auth-service
     newTag: develop
   - name: ghcr.io/tear94fall/modu-chat/member-service
