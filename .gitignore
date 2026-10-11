@@ -2,6 +2,7 @@
 k8s/infra.env
 k8s/mongodb.key
 k8s/deploy-github-app.pem
+k8s/argocd-deploy-token
 **/.env
 
 # 로컬 백업 파일
