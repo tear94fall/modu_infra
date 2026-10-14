@@ -38,7 +38,7 @@ images:
   - name: ghcr.io/tear94fall/modu-chat/profile-service
     newTag: develop
   - name: ghcr.io/tear94fall/modu-chat/point-service
-    newTag: develop-bf6b9fb
+    newTag: develop-291f2b6
   - name: ghcr.io/tear94fall/modu-chat/schedule-service
     newTag: develop-35db83f
   - name: ghcr.io/tear94fall/modu-commerce/commerce-service
