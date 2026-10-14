@@ -31,6 +31,16 @@ data:
           - id: container
             type: container
             add_metadata_from_filepath: true
+          # docker json-file 는 16KB 를 넘는 줄을 여러 항목으로 쪼개 쓰고(마지막 조각만 \n 으로 끝난다), container 오퍼레이터는 CRI(P/F 태그)만
+          # 다시 붙이고 docker 형식은 안 붙인다. 그대로 두면 큰 앱 JSON 줄(api.access 의 응답 본문 등)이 앞 16KB 조각만 남고 JSON 파싱에 실패해
+          # 필드 없이 저장된다(2026-10-15, chat-service 방 목록 35KB). 같은 파일의 조각을 \n 으로 끝나는 항목까지 이어 붙인다. 1MiB 상한.
+          - id: docker_partial
+            type: recombine
+            combine_field: body
+            combine_with: ""
+            is_last_entry: body endsWith "\n"
+            source_identifier: attributes["log.file.path"]
+            max_log_size: 1048576
           - id: names
             type: move
             from: resource["k8s.container.name"]
