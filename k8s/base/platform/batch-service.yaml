@@ -1,0 +1,100 @@
+# batch-service(modu_platform): 모두 시스템 "배치" 탭의 백엔드 — 잡 정의(주기·사용 여부·타임아웃)·수동 실행·실행 이력. cron 에 맞춰 각 서비스의
+# POST /api-internal/v1/jobs/{name}/run 을 부른다. 설정은 config-repo/batch-service.yml(modu_platform), DB 는 mysql-platform(modu-platform.batch_job*).
+# k8s API 는 쓰지 않는다(ServiceAccount 불필요). 설계: modu_platform docs/superpowers/specs/2026-10-17-batch-platform-design.md
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: batch-service
+  annotations:
+    # Argo CD sync-wave: JVM Deployment 는 한 번에 하나씩 롤아웃(앞 wave 가 Healthy 돼야 다음). 인프라·nginx 는 0(기본).
+    argocd.argoproj.io/sync-wave: "15"
+  labels:
+    app: batch-service
+    app.kubernetes.io/name: batch-service
+    app.kubernetes.io/component: platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: batch-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: batch-service
+        app.kubernetes.io/name: batch-service
+        app.kubernetes.io/component: platform
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: false
+      containers:
+      - name: batch-service
+        image: ghcr.io/tear94fall/modu-platform/batch-service:develop
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8910
+        env:
+        - name: CONFIG_SERVER_URI
+          value: "http://config-service:8888"
+        # config-service 는 {cipher} 가 풀린 평문을 돌려주므로 인증을 요구한다. 설정을 받기 전이라 토큰은 config-repo 가 아니라
+        # Secret config-service(INTERNAL_API_TOKEN)에서 환경변수로 받아 Spring Cloud Config 클라이언트가 Basic 비밀번호로 보낸다.
+        - name: SPRING_CLOUD_CONFIG_USERNAME
+          value: "modu"
+        - name: SPRING_CLOUD_CONFIG_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: config-service
+              key: INTERNAL_API_TOKEN
+        - name: JAVA_TOOL_OPTIONS
+          value: "-Dprofiler.logback.logging.transactioninfo=true"
+        startupProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8910
+          periodSeconds: 5
+          failureThreshold: 30
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8910
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 6
+          timeoutSeconds: 3
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8910
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          failureThreshold: 3
+          timeoutSeconds: 3
+        resources:
+          requests:
+            memory: 256Mi
+            cpu: 100m
+          limits:
+            memory: 640Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: batch-service
+  labels:
+    app: batch-service
+    app.kubernetes.io/name: batch-service
+    app.kubernetes.io/component: platform
+spec:
+  selector:
+    app: batch-service
+  ports:
+  - name: http
+    port: 8910
+    targetPort: http

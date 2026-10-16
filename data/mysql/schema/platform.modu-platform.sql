@@ -12,6 +12,63 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `batch_job` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `service` varchar(64) NOT NULL,
+  `job_name` varchar(64) NOT NULL,
+  `description` varchar(255) DEFAULT NULL,
+  `cron` varchar(64) NOT NULL,
+  `zone` varchar(64) NOT NULL DEFAULT 'Asia/Seoul',
+  `enabled` tinyint(1) NOT NULL DEFAULT '0',
+  `timeout_seconds` int NOT NULL DEFAULT '600',
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_job_service_name` (`service`,`job_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `batch_job_change` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `batch_job_id` bigint NOT NULL,
+  `changed_by` varchar(128) NOT NULL,
+  `changed_at` datetime(6) NOT NULL,
+  `field` varchar(32) NOT NULL,
+  `before_value` varchar(255) DEFAULT NULL,
+  `after_value` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_batch_job_change_job` (`batch_job_id`,`changed_at` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `batch_job_run` (
+  `id` varchar(40) NOT NULL,
+  `batch_job_id` bigint NOT NULL,
+  `service` varchar(64) NOT NULL,
+  `job_name` varchar(64) NOT NULL,
+  `trigger_type` varchar(16) NOT NULL,
+  `triggered_by` varchar(128) DEFAULT NULL,
+  `status` varchar(16) NOT NULL,
+  `started_at` datetime(6) NOT NULL,
+  `finished_at` datetime(6) DEFAULT NULL,
+  `duration_ms` bigint DEFAULT NULL,
+  `http_status` int DEFAULT NULL,
+  `result_json` json DEFAULT NULL,
+  `error` text,
+  `created_at` datetime(6) NOT NULL,
+  `updated_at` datetime(6) NOT NULL,
+  `running_job_id` bigint GENERATED ALWAYS AS ((case when (`status` = _utf8mb4'RUNNING') then `batch_job_id` end)) STORED,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_batch_job_run_running` (`running_job_id`),
+  KEY `idx_batch_job_run_job_started` (`batch_job_id`,`started_at` DESC),
+  KEY `idx_batch_job_run_started` (`started_at` DESC),
+  KEY `idx_batch_job_run_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `deployment` (
   `id` varchar(40) NOT NULL,
   `service` varchar(64) NOT NULL,
@@ -37,6 +94,16 @@ CREATE TABLE `deployment` (
   KEY `idx_deployment_service_started` (`service`,`started_at` DESC),
   KEY `idx_deployment_started` (`started_at` DESC),
   KEY `idx_deployment_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `shedlock` (
+  `name` varchar(64) NOT NULL,
+  `lock_until` timestamp(3) NOT NULL,
+  `locked_at` timestamp(3) NOT NULL,
+  `locked_by` varchar(255) NOT NULL,
+  PRIMARY KEY (`name`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
