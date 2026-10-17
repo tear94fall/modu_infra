@@ -1,17 +1,17 @@
 # k8s — modu 전체(앱 + 인프라) Kustomize 매니페스트
 
-modu 의 **앱 계층**(플랫폼 2 + 메신저 10 + 커머스 2 + 콘솔 3 = Deployment 17개)과 **인프라 전부**(MySQL×10, Redis, Redis 클러스터×6, ZooKeeper·Kafka·Debezium·Kafka UI, Mongo×3, Ceph(RGW), RabbitMQ, OpenSearch·Dashboards, Prometheus·Grafana·exporter 4개, Pinpoint)를 로컬 **Colima**(k3s, context `colima`, 1 노드, 네임스페이스 `modu` 하나 — 2026-10-06 까지는 Docker Desktop)에 띄우는 매니페스트입니다. 아래 [Colima](#colima-2026-10-06-부터).
+modu 의 **앱 계층**(플랫폼 4 + 메신저 10 + 커머스 2 + 콘솔 3 = Deployment 19개)과 **인프라 전부**(MySQL×10, Redis, Redis 클러스터×6, ZooKeeper·Kafka·Debezium·Kafka UI, Mongo×3, Ceph(RGW), RabbitMQ, OpenSearch·Dashboards, Prometheus·Grafana·exporter 4개, Pinpoint)를 로컬 **Colima**(k3s, context `colima`, 1 노드, 네임스페이스 `modu` 하나 — 2026-10-06 까지는 Docker Desktop)에 띄우는 매니페스트입니다. 아래 [Colima](#colima-2026-10-06-부터).
 인프라의 Service 이름·포트는 compose 컨테이너 이름·포트와 같다(`mysql-chat:3306`, `kafka:9092`, `redis-node-1:6379` …) — 그래서 앱 설정(config-repo, env)은 compose 때와 그대로다. 인프라는 2026-10-03 에 compose 에서 옮겼다(아래 [인프라도 k8s](#인프라도-k8s)).
 
 ```
 k8s/
   base/                              # 환경 공통. namespace modu, 공통 라벨 app.kubernetes.io/part-of=modu
     namespace.yaml
-    platform/   config-service.yaml gateway-service.yaml deploy-service.yaml   # config·gateway replicas 2; deploy-service = 배포 탭 백엔드(SA+Role 읽기 전용)
+    platform/   config-service.yaml gateway-service.yaml deploy-service.yaml batch-service.yaml   # config·gateway replicas 2; deploy-service = 배포 탭 백엔드(SA+Role 읽기 전용); batch-service = 배치 탭 백엔드(2026-10-17)
     messenger/  auth member chat chat-store ws push storage profile point schedule (-service.yaml)
     commerce/   commerce-service.yaml web.yaml
     admin/      modu-admin.yaml modu-system.yaml modu-internal.yaml
-    data/       mysql.yaml(10) mysql-platform.yaml(deploy-service 이력 DB, 소스+레플리카) redis.yaml redis-cluster.yaml(6 + init Job) kafka.yaml(zookeeper·kafka·debezium·kafka-ui) mongo.yaml(3) rgw.yaml(ExternalName → ceph/) rabbitmq.yaml
+    data/       mysql.yaml(10) mysql-platform.yaml(deploy-service 배포 이력·batch-service 배치 DB, 소스+레플리카) redis.yaml redis-cluster.yaml(6 + init Job) kafka.yaml(zookeeper·kafka·debezium·kafka-ui) mongo.yaml(3) rgw.yaml(ExternalName → ceph/) rabbitmq.yaml
     observability/  opensearch.yaml(+dashboards) otel-collector.yaml(파드 로그 DaemonSet) prometheus.yaml(+RBAC) grafana.yaml(+grafana/dashboards/*.json)
                     exporters.yaml(mysqld·redis·mongodb·kafka) pinpoint.yaml(hbase·mysql·redis·zoo1·collector·web)
   overlays/dev/
@@ -163,7 +163,7 @@ Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커
 | 구성 요소 | 종류 | 이미지 | Service:포트 | PVC | 메모리 req / limit |
 |---|---|---|---|---|---|
 | mysql-{member,chat,push,profile} + `-replica` | STS ×8 | mysql:8.0.32 | :3306 | 2Gi | 384Mi / 768Mi |
-| mysql-platform | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 플랫폼 서비스용(2026-10-07): deploy-service 배포 이력 `modu-platform.deployment`. 소스(쓰기). 스키마는 새 클러스터면 `sh data/mysql/apply-baseline.sh platform` 으로 손으로(init 스크립트 없음), 계정 platform(PLATFORM_DB_*) |
+| mysql-platform | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 플랫폼 서비스용(2026-10-07): deploy-service 배포 이력 `modu-platform.deployment`, batch-service 배치 `batch_job`·`batch_job_run`·`batch_job_change`·`shedlock`(2026-10-17). 소스(쓰기). 스키마는 새 클러스터면 `sh data/mysql/apply-baseline.sh platform` 으로 손으로(init 스크립트 없음), 계정 platform(PLATFORM_DB_*) |
 | mysql-platform-replica | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 레플리카(읽기, server-id 25, super_read_only). 복제·읽기 계정 platform_ro 는 `sh data/mysql/replica-setup.sh platform`(PLATFORM_REPL/RO_PASSWORD). deploy-service 의 이력 목록 조회가 여기로 |
 | mysql-commerce(-replica) | STS ×2 | mysql:8.0.44 | :3306 | 2Gi | 384Mi / 768Mi |
 | redis | STS | redis:7.2.4-alpine | :6379 | 256Mi | 32Mi / 128Mi |
