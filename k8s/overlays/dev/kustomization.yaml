@@ -16,43 +16,43 @@ resources:
 # 이미지 태그. base 는 develop(브랜치 롤링 태그). CI 가 올린 태그(예: sha-…)로 바꿔 apply 하면 그 Deployment 만 롤아웃된다.
 images:
   - name: ghcr.io/tear94fall/modu-platform/config-service
-    newTag: develop-bc160d5
+    newTag: develop-51f6ccc
   - name: ghcr.io/tear94fall/modu-platform/gateway-service
-    newTag: develop-e32b2e5
+    newTag: develop-51f6ccc
   - name: ghcr.io/tear94fall/modu-platform/deploy-service
-    newTag: develop-84b8b35
+    newTag: develop-51f6ccc
   - name: ghcr.io/tear94fall/modu-platform/batch-service
-    newTag: develop
+    newTag: develop-51f6ccc
   - name: ghcr.io/tear94fall/modu-chat/auth-service
-    newTag: develop
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/member-service
-    newTag: develop
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/chat-service
-    newTag: develop-76c3b5c
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/chat-store-service
-    newTag: develop
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/ws-service
-    newTag: develop-4dd06ab
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/push-service
-    newTag: develop
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/storage-service
-    newTag: develop-5708871  # AWS SDK v2 + Ceph RGW (modu_chat #423). 움직이는 태그(develop)는 노드의 옛 MinIO 이미지가 쓰인다 — 항상 커밋 태그로
+    newTag: develop-4e4400a  # AWS SDK v2 + Ceph RGW (modu_chat #423). 움직이는 태그(develop)는 노드의 옛 MinIO 이미지가 쓰인다 — 항상 커밋 태그로
   - name: ghcr.io/tear94fall/modu-chat/profile-service
-    newTag: develop
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/point-service
-    newTag: develop-291f2b6
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/schedule-service
-    newTag: develop-35db83f
+    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-commerce/commerce-service
-    newTag: develop-5f4cab0
+    newTag: develop-41c5b3a
   - name: ghcr.io/tear94fall/modu-commerce/web
-    newTag: develop-5f4cab0  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
+    newTag: develop-41c5b3a  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
   - name: ghcr.io/tear94fall/modu-admin/modu-admin
-    newTag: develop-b4bc59b  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
+    newTag: develop-9f351bf  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
   - name: ghcr.io/tear94fall/modu-admin/modu-system
-    newTag: develop-4ff47b6  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
+    newTag: develop-9f351bf  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
   - name: ghcr.io/tear94fall/modu-admin/modu-internal
-    newTag: develop-b4bc59b  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
+    newTag: develop-9f351bf  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
 
 # 복제 수. 1 노드라 gateway·config 만 2(롤링 재배포 때 끊기지 않게), 나머지는 1.
 # 메모리 requests 합(JVM 14개×512Mi + nginx 4개×16Mi ≈ 7.1GiB)이 노드 allocatable 을 넘으면 Pending 이 된다 — Docker Desktop 메모리를 확인(README).
