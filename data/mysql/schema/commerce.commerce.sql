@@ -225,8 +225,6 @@ CREATE TABLE `orders` (
   `delivered_at` datetime(6) DEFAULT NULL,
   `earn_points` bigint DEFAULT NULL,
   `earn_rate` int DEFAULT NULL,
-  `earn_status` varchar(10) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'NONE',
-  `earned_at` datetime(6) DEFAULT NULL,
   `idempotency_key` varchar(64) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `UKg8pohnngqi5x1nask7nff2u7w` (`order_no`),
