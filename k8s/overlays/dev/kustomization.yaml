@@ -41,8 +41,6 @@ images:
     newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/point-service
     newTag: develop-4e4400a
-  - name: ghcr.io/tear94fall/modu-chat/schedule-service
-    newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-commerce/commerce-service
     newTag: develop-3cea6eb
   - name: ghcr.io/tear94fall/modu-commerce/web
@@ -82,8 +80,6 @@ replicas:
   - name: profile-service
     count: 1
   - name: point-service
-    count: 1
-  - name: schedule-service
     count: 1
   - name: commerce-service
     count: 1

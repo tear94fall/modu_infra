@@ -29,7 +29,6 @@ resources:
   - messenger/storage-service.yaml
   - messenger/profile-service.yaml
   - messenger/point-service.yaml
-  - messenger/schedule-service.yaml
   - commerce/commerce-service.yaml
   - commerce/web.yaml
   - admin/modu-admin.yaml

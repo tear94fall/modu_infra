@@ -64,7 +64,7 @@ MySQL 스키마는 애플리케이션이 아니라 DBA 가 gh-ost 로 바꿉니�
   - 대상: `member` `chat` `push` `profile` `commerce` `platform`, 묶음 `messenger`(앞의 넷) `all`. (`data/mysql-commerce/replica-setup.sh` 는 `commerce` 를 부르는 껍데기)
   - 복제 계정 `repl` 과 앱 읽기 계정(메신저 `modu_ro`, 커머스 `commerce_ro`, SELECT 만)을 소스에 만든다(복제로 레플리카에 전파). 비밀번호는 Secret `infra` 의 `MESSENGER_REPL_PASSWORD`·`MESSENGER_RO_PASSWORD`, `COMMERCE_REPL_PASSWORD`·`COMMERCE_RO_PASSWORD`.
   - 레플리카가 복제 중이 아니면 소스 DB 를 GTID 위치와 함께 덤프해(`kubectl exec` 소스 mysqldump → `kubectl exec -i` 레플리카 mysql, Mac 을 거쳐 간다) 적재한 뒤 `SOURCE_HOST=mysql-<x>`(Service), `SOURCE_AUTO_POSITION=1` 로 복제를 시작하고 `read_only`·`super_read_only` 를 `SET PERSIST` 로 켠다. 복제 중이면 계정만 맞춘다.
-  - mysql-member 에는 `modu-chat`(회원)·`modu-point`(포인트)·`modu-schedule`(스케줄) 스키마가 함께 있다. 복제를 건 뒤 소스에서 만든 스키마는 복제로 따라온다.
+  - mysql-member 에는 `modu-chat`(회원)·`modu-point`(포인트) 스키마가 함께 있다(`modu-schedule` 은 2026-10-19 에 schedule-service 와 함께 지웠다). 복제를 건 뒤 소스에서 만든 스키마는 복제로 따라온다.
   - 상태 확인: `kubectl -n modu exec mysql-member-replica-0 -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -e "SHOW REPLICA STATUS\G"'` (Replica_IO/SQL_Running, Seconds_Behind_Source)
   - `read_only` 를 레플리카 시작 옵션에 두면 이미지 첫 초기화가 root 비밀번호를 못 만든다 — 그래서 스크립트가 켠다.
 

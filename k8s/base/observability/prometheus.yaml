@@ -91,7 +91,6 @@ data:
               - chat-store-service:8100
               - config-service:8888
               - point-service:9600
-              - schedule-service:8110
               - commerce-service:8200
 
       - job_name: mysql

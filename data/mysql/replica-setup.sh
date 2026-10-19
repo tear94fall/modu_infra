@@ -77,10 +77,10 @@ messenger() {
 
 target() {
   case "$1" in
-    # mysql-member 에는 회원(modu-chat)·포인트(modu-point)·스케줄(modu-schedule) 스키마가 함께 있다.
+    # mysql-member 에는 회원(modu-chat)·포인트(modu-point) 스키마가 함께 있다.
     # 덤프 뒤에 소스에서 새로 만든 스키마는 복제로 따라온다.
     member)   dbs=$(mysql_in mysql-member-0 -N -e "SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE 'modu-%'" </dev/null | tr '\n' ' ')
-              messenger member "$dbs" "modu-chat modu-point modu-schedule" ;;
+              messenger member "$dbs" "modu-chat modu-point" ;;
     chat|push|profile) messenger "$1" "modu-chat" "modu-chat" ;;
     commerce) setup commerce "$(secret_val COMMERCE_REPL_PASSWORD)" commerce_ro "$(secret_val COMMERCE_RO_PASSWORD)" commerce commerce ;;
     # 플랫폼 서비스 DB(deploy-service 배포 이력). root 는 파드 env(PLATFORM_DB_PASSWORD 에서 온 MYSQL_ROOT_PASSWORD).

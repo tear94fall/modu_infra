@@ -28,7 +28,7 @@ dump() { # $1 instance  $2 schema
 
 for t in ${*:-member chat push profile commerce platform}; do
   case "$t" in
-    member)   for s in modu-chat modu-point modu-schedule; do dump member "$s"; done ;;
+    member)   for s in modu-chat modu-point; do dump member "$s"; done ;;
     chat|push|profile) dump "$t" modu-chat ;;
     commerce) dump commerce commerce ;;
     platform) dump platform modu-platform ;;

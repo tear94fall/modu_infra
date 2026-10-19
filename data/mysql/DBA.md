@@ -20,7 +20,7 @@
 
 | 경로 | 내용 |
 |---|---|
-| `schema/<instance>.<schema>.sql` | 스키마 기준선 8개 (member: modu-chat·modu-point·modu-schedule, chat·push·profile: modu-chat, commerce: commerce, platform: modu-platform). 데이터 없음 |
+| `schema/<instance>.<schema>.sql` | 스키마 기준선 7개 (member: modu-chat·modu-point, chat·push·profile: modu-chat, commerce: commerce, platform: modu-platform). 데이터 없음 |
 | `schema/changes/YYYY-MM-DD-<topic>.sql` | 변경 이력. 파일 머리에 대상·사유·적용 방식·되돌리기 |
 | `schema/checks/orphans.sql` | 고아 행 점검 쿼리(지운 FK 28쌍) |
 | `dump-schema.sh` | 기준선 다시 뜨기 (`OUT_DIR=` 로 다른 곳에 떠서 비교할 수 있다) |
