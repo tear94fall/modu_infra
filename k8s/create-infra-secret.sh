@@ -3,6 +3,7 @@
 #   infra            k8s/infra.env 의 KEY=VALUE 전부(23개. 키 목록·뜻은 infra-secrets.example.env)
 #   mongo-keyfile    k8s/mongodb.key                   (mongo 의 replica set 내부 인증 키, 1024B)
 #   deploy-service   k8s/deploy-github-app.pem + k8s/argocd-deploy-token  (GitHub App 비밀키·Argo CD 토큰 — 있는 것만 담는다)
+#   cloudflared      k8s/cloudflared-credentials.json  (Cloudflare Tunnel 자격 — 없으면 건너뛴다)
 #   mysqld-exporter  .my.cnf — infra.env 의 MYSQL_ROOT_PASSWORD([client], 메신저 root)·COMMERCE_DB_PASSWORD([client.commerce], 커머스 root)로 만든다
 # 두 파일은 gitignored. 처음이면 infra-secrets.example.env 를 infra.env 로 복사해 값을 채운다(값은 compose 시절 data/.env·monitoring/.env·pinpoint-docker/.env 를 2026-10-04 에 합친 것).
 #
@@ -18,6 +19,7 @@ INFRA_ENV="${INFRA_ENV:-$HERE/infra.env}"
 MONGO_KEY="${MONGO_KEY:-$HERE/mongodb.key}"
 APP_KEY="${APP_KEY:-$HERE/deploy-github-app.pem}"   # deploy-service 의 GitHub App 비밀키(PKCS#8 PEM, gitignored)
 ARGO_TOKEN="${ARGO_TOKEN:-$HERE/argocd-deploy-token}" # Argo CD 로컬 계정 deploy 의 API 토큰 한 줄(gitignored)
+CF_CREDS="${CF_CREDS:-$HERE/cloudflared-credentials.json}" # Cloudflare Tunnel modu-dev 의 자격(= ~/.cloudflared/<UUID>.json, gitignored)
 
 for f in "$INFRA_ENV" "$MONGO_KEY"; do
   [ -r "$f" ] || { echo "읽을 수 없다: $f  (infra-secrets.example.env 를 보고 만든다)" >&2; exit 1; }
@@ -106,3 +108,11 @@ if [ ${#ARGS_DEPLOY[@]} -gt 0 ]; then
   echo "deploy-service: 비밀값 ${#ARGS_DEPLOY[@]}개 반영"
 fi
 echo "Secret infra 키($(( $(echo "$KEYS" | wc -w) )))개:$KEYS"
+
+# Cloudflare Tunnel(overlays/dev/cloudflared.yaml) 의 자격. `cloudflared tunnel create modu-dev` 가 만든 ~/.cloudflared/<UUID>.json 을 복사해 둔다.
+if [ -r "$CF_CREDS" ]; then
+  kubectl -n "$NS" create secret generic cloudflared --from-file=credentials.json="$CF_CREDS" --dry-run=client -o yaml | kubectl apply -f -
+  echo "cloudflared: 터널 자격 반영"
+else
+  echo "cloudflared: $CF_CREDS 없음(터널 파드가 못 뜬다)" >&2
+fi

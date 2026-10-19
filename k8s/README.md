@@ -19,15 +19,18 @@ k8s/
     loadbalancers.yaml               # Mac 에서 들어오는 입구: 앱 6개 + 인프라 UI 8개(compose 와 같은 호스트 포트)
     storageclass.yaml                # k3s 용 StorageClass `standard`(local-path) — base 의 PVC 이름을 안 바꾸려고
     colima-ports.sh                  # LB 포트를 Mac(localhost·LAN IP)으로 내보내는 nginx(stream) 컨테이너
+    cloudflared.yaml                 # Cloudflare Tunnel 파드 + ingress 설정(ConfigMap) — 아래 "바깥에서 들어오는 길"
+    web-root.yaml                    # 루트 도메인 정적 소개 페이지(nginx) — https://joonsublim.com
     pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS) — dev 는 2026-10-04 부터 꺼 둠(아래 "Pinpoint 켜기/끄기")
   cicd/argocd/                       # Argo CD(v3.5.3) 설치 + Application 3개(modu-dev, modu-config-repo, modu-ceph) — 아래 "Argo CD 로 배포"
   ceph/                              # Rook-Ceph(RGW = S3, MinIO 대체) — 아래 "Ceph"
     secret.example.yaml              # Secret config-service 의 틀(값 비어 있음) — kustomization 에 없음
-  create-infra-secret.sh             # infra.env + mongodb.key + deploy-github-app.pem + argocd-deploy-token → Secret infra, mongo-keyfile, mysqld-exporter, deploy-service
+  create-infra-secret.sh             # infra.env + mongodb.key + deploy-github-app.pem + argocd-deploy-token + cloudflared-credentials.json → Secret infra, mongo-keyfile, mysqld-exporter, deploy-service, cloudflared
   infra-secrets.example.env          # Secret infra 의 키 목록(값 비어 있음) — infra.env 로 복사해 채운다
   infra.env, mongodb.key             # (gitignored) Secret 의 원본 값·mongo keyFile
   deploy-github-app.pem              # (gitignored) deploy-service 의 GitHub App 비밀키(PKCS#8 PEM) — 없으면 그 키만 건너뛴다
   argocd-deploy-token                # (gitignored) Argo CD 로컬 계정 deploy 의 API 토큰 한 줄 — Secret deploy-service 의 ARGOCD_TOKEN
+  cloudflared-credentials.json       # (gitignored) Cloudflare Tunnel modu-dev 의 자격(= ~/.cloudflared/<UUID>.json) — Secret cloudflared
 ```
 
 ## Colima (2026-10-06 부터)
@@ -153,6 +156,24 @@ kubectl -n modu port-forward svc/mysql-member 3306:3306        # compose 때 호
 kubectl -n modu port-forward svc/mongo-01 27017:27017
 kubectl -n modu port-forward svc/redis 6379:6379
 ```
+## 바깥에서 들어오는 길 — Cloudflare Tunnel (2026-10-20 부터)
+
+집 밖(LTE)에서도 dev 를 쓰려고 **Cloudflare Tunnel** 을 둔다. 공유기 포트포워딩·공인 IP 없이, 파드 `cloudflared` 가 Cloudflare 엣지로 **나가는** 연결(QUIC, 4개)을 맺고 그 안으로 요청이 들어온다. HTTPS 종료·인증서는 Cloudflare 가 한다. 도메인 `joonsublim.com`(Cloudflare DNS).
+
+| 호스트 | 대상(클러스터 안) | 용도 |
+|---|---|---|
+| https://joonsublim.com (+www) | `web-root:80` | 루트 정적 소개 페이지(`web-root.yaml` 의 ConfigMap 한 장) |
+| https://dev-api.joonsublim.com | `gateway-service:8000` | 앱 API + WebSocket(`/ws-service/modu-chat`) |
+| https://dev-shop.joonsublim.com | `modu-commerce-web:80` | 커머스 WebView 페이지 |
+
+그 외 호스트는 `http_status:404`. **콘솔(8081/8084/8085)·Argo·config-service·관측 UI 는 넣지 않는다** — 관리 포트는 Mac loopback 만(할 일 0-3). 밖에서 꼭 써야 하면 Cloudflare Access(로그인 강제) 뒤에 둔다.
+
+- **설정은 Git 이 원본**(`overlays/dev/cloudflared.yaml` 의 ConfigMap `config.yml`, "locally-managed"). 대시보드에서 바꾸는 원격 관리 방식이 아니다. 호스트를 더 붙일 땐 ① ingress 에 줄 추가 → ② `cloudflared tunnel route dns modu-dev <host>`(CNAME 생성, Mac 의 `~/.cloudflared/cert.pem` 로그인 필요) → ③ `kubectl -n modu rollout restart deploy/cloudflared`(ConfigMap 은 재시작해야 읽는다).
+- **자격**: 터널은 Mac 에서 `cloudflared tunnel login` → `cloudflared tunnel create modu-dev` 로 만들었고(UUID 는 ConfigMap 의 `tunnel:`), 그때 생긴 `~/.cloudflared/<UUID>.json` 을 `k8s/cloudflared-credentials.json`(gitignored, 600)으로 복사해 `./create-infra-secret.sh` 가 Secret `cloudflared` 로 만든다. 이 json 이 새면 누구나 이 터널로 자기 서버를 붙일 수 있다 — 유출 시 `cloudflared tunnel delete` 후 새로 만든다. `cert.pem` 은 계정 권한이라 클러스터에 넣지 않는다.
+- **확인**: `cloudflared tunnel info modu-dev`(커넥터·엣지 목록), `curl -s https://dev-api.joonsublim.com/actuator/health`, 파드 로그에 `Registered tunnel connection` 4줄. `/ready`(metrics 포트 2000)가 readiness/liveness.
+- **Google 로그인(커머스 웹)**: 웹 클라이언트 ID 의 "승인된 JavaScript 원본"에 `https://dev-shop.joonsublim.com` 을 등록해야 한다(2026-10-20 등록). 없으면 `400 origin_mismatch`.
+- **앱은 아직 LAN IP(192.168.0.3)로 본다** — 앱 빌드에 터널 주소(`https://dev-api…`, `wss://…`)를 넣는 것과 CORS/Google 로그인 origin 은 후속.
+
 Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커가 클러스터 안의 이름 `redis-node-N`·`kafka:9092` 를 광고한다) — `kubectl -n modu exec -it redis-node-1-0 -- redis-cli -c`, `kubectl -n modu exec -it kafka-0 -- kafka-topics --bootstrap-server kafka:9092 --list` 처럼 파드 안에서. 토픽·Debezium 커넥터·MySQL 복제·gh-ost 는 `data/kafka`, `data/debezium`, `data/mysql` 의 스크립트가 그렇게 돈다(루트 README "운영 스크립트").
 
 ## 인프라도 k8s
@@ -309,7 +330,7 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 - **수동 Sync(버튼)**. 머지해도 자동으로 적용되지 않는다 — UI 의 Sync 또는 API(`POST /api/v1/applications/<app>/sync`). Argo 의 self-heal(손으로 바꾼 걸 Git 으로 되돌림)은 자동 동기화의 하위 옵션이라 수동 모드엔 없다. `kubectl` 로 바꾸면 UI 에 OutOfSync 로 보인다.
 - **prune 없음**. Git 에서 지운 객체는 자동으로 안 지운다(UI 에서 확인 후 Sync 창의 Prune 체크).
 - **sync-wave**: JVM Deployment 13개는 base 의 annotation `argocd.argoproj.io/sync-wave` 1(config)…13(commerce). Argo 는 앞 wave 가 Healthy 가 돼야 다음을 적용하므로 공통 패치를 바꿔도 한 번에 하나씩 롤아웃된다(JVM 26개 OOM 사고 재발 방지). 인프라·nginx 는 0(기본, 가장 먼저).
-- **Argo 가 안 건드리는 것**: Secret 5개(`config-service`·`infra`·`mongo-keyfile`·`mysqld-exporter`·`deploy-service` — Git 에 없음, `create-infra-secret.sh`), Argo 자신. 추적은 annotation `argocd.argoproj.io/tracking-id`(라벨 방식 아님).
+- **Argo 가 안 건드리는 것**: Secret 6개(`config-service`·`infra`·`mongo-keyfile`·`mysqld-exporter`·`deploy-service`·`cloudflared` — Git 에 없음, `create-infra-secret.sh`), Argo 자신. 추적은 annotation `argocd.argoproj.io/tracking-id`(라벨 방식 아님).
 - **ApplyOutOfSyncOnly**: 바뀐 객체만 apply. 완료된 Job(`redis-cluster-init`)은 `spec` 비교 제외.
 - 뺀 컴포넌트: dex(SSO)·notifications·applicationset 은 replicas 0. 메모리 limits 합 ≈ 1.1GiB(Pinpoint 를 끄며 비운 자리).
 
@@ -368,7 +389,7 @@ kubectl delete -k overlays/dev                              # 전부 내리기 �
 - **앱 파드의 service link env** — 인프라 Service 가 ClusterIP 가 되면서 앱 파드에도 `MYSQL_MEMBER_PORT=tcp://…`, `KAFKA_PORT` 같은 env 가 수십 개 들어간다. 겹치는 이름은 지금 없지만 앱 Deployment 에도 `enableServiceLinks: false` 를 주는 것이 안전하다.
 - **Pinpoint 요청 추적** — (dev 에선 꺼 둠) 켰을 때 에이전트 13개가 컬렉터에 등록되고 앱 목록에 보이지만, 요청 처리 로그 줄에 `PtxId`/`PspanId` 가 아직 안 붙는다(기동 줄에는 붙음). 운영에 올리기 전에 트랜잭션 샘플링/서블릿 플러그인 설정 확인 필요.
 - **Prometheus 스크레이프** — 정적 대상(Service 이름)만. 파드가 2개 이상인 Deployment 는 Service 로 긁으면 매번 다른 파드가 응답한다 — 그때는 kubernetes_sd(role: endpoints/pod)로 바꿀 것.
-- **Ingress** — 안 쓴다. Docker Desktop 에선 LoadBalancer Service 로 충분. 실제 클러스터로 갈 때 Ingress(게이트웨이만 노출)로.
+- **Ingress** — 안 쓴다. 안에서는 LoadBalancer Service, 밖에서는 Cloudflare Tunnel(위 "바깥에서 들어오는 길")로 충분. 실제 클러스터로 갈 때 Ingress(게이트웨이만 노출)로.
 - **runAsNonRoot** — 이미지에 USER 가 없어 false. Dockerfile 에 비 root 사용자 추가 후 true 로.
 - **storage-service `/data`** — compose 는 bind mount, k8s 는 emptyDir(multipart 임시 파일이라 유실돼도 된다; 실제 파일은 Ceph RGW).
 - **config-service·gateway replicas** — dev 는 메모리 때문에 1. 실제 클러스터에선 2 이상.

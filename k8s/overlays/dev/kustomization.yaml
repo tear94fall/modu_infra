@@ -12,6 +12,8 @@ resources:
   - ../../base
   - loadbalancers.yaml
   - storageclass.yaml     # Colima(k3s)용 StorageClass `standard` (2026-10-06)
+  - cloudflared.yaml      # Cloudflare Tunnel — joonsublim.com, dev-api/dev-shop (2026-10-20)
+  - web-root.yaml         # 루트 도메인 정적 소개 페이지 https://joonsublim.com
 
 # 이미지 태그. base 는 develop(브랜치 롤링 태그). CI 가 올린 태그(예: sha-…)로 바꿔 apply 하면 그 Deployment 만 롤아웃된다.
 images:
