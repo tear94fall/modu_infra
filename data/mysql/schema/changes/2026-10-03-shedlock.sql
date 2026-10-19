@@ -1,4 +1,5 @@
 -- 2026-10-03  ShedLock 잠금 테이블 — 스케줄러가 있는 서비스의 스키마에만 (commerce, modu-schedule)
+-- 2026-10-19: commerce 는 2026-10-19-commerce-drop-shedlock.sql 로 지웠다(트리거가 batch-service 로 옮겨감). modu-schedule 은 스키마째 삭제.
 -- 파드가 2개 이상이어도 같은 잡이 한 번만 돌게 한다. 서비스 코드의 JdbcTemplateLockProvider 가 master 에서 이 행을 잠근다.
 -- 적용 방식: CREATE TABLE (잠금 없음). 되돌리기: DROP TABLE shedlock;
 

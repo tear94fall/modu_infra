@@ -467,16 +467,6 @@ CREATE TABLE `reviews` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE `shedlock` (
-  `name` varchar(64) NOT NULL,
-  `lock_until` timestamp(3) NOT NULL,
-  `locked_at` timestamp(3) NOT NULL,
-  `locked_by` varchar(255) NOT NULL,
-  PRIMARY KEY (`name`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `sku_option_values` (
   `sku_id` bigint NOT NULL,
   `option_value_id` bigint NOT NULL,
