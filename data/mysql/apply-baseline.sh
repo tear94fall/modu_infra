@@ -32,7 +32,7 @@ apply() { # $1 instance  $2 schema
 [ $# -gt 0 ] || { echo "사용: sh data/mysql/apply-baseline.sh member|chat|push|profile|commerce|platform ..." >&2; exit 2; }
 for t in "$@"; do
   case "$t" in
-    member)   for s in modu-chat modu-point modu-schedule; do apply member "$s"; done ;;
+    member)   for s in modu-chat modu-point; do apply member "$s"; done ;;
     chat|push|profile) apply "$t" modu-chat ;;
     commerce) apply commerce commerce ;;
     platform) apply platform modu-platform ;;

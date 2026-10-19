@@ -34,7 +34,7 @@ grant() { # $1 instance  $2.. 스키마 이름들
 
 for t in ${*:-member chat push profile commerce platform}; do
   case "$t" in
-    member)   grant member 'modu-chat' 'modu-point' 'modu-schedule' ;;
+    member)   grant member 'modu-chat' 'modu-point' ;;
     chat)     grant chat 'modu-chat' ;;
     push)     grant push 'modu-chat' ;;
     profile)  grant profile 'modu-chat' ;;

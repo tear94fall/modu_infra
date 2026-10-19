@@ -8,7 +8,7 @@ k8s/
   base/                              # 환경 공통. namespace modu, 공통 라벨 app.kubernetes.io/part-of=modu
     namespace.yaml
     platform/   config-service.yaml gateway-service.yaml deploy-service.yaml batch-service.yaml   # config·gateway replicas 2; deploy-service = 배포 탭 백엔드(SA+Role 읽기 전용); batch-service = 배치 탭 백엔드(2026-10-17)
-    messenger/  auth member chat chat-store ws push storage profile point schedule (-service.yaml)
+    messenger/  auth member chat chat-store ws push storage profile point (-service.yaml)
     commerce/   commerce-service.yaml web.yaml
     admin/      modu-admin.yaml modu-system.yaml modu-internal.yaml
     data/       mysql.yaml(10) mysql-platform.yaml(deploy-service 배포 이력·batch-service 배치 DB, 소스+레플리카) redis.yaml redis-cluster.yaml(6 + init Job) kafka.yaml(zookeeper·kafka·debezium·kafka-ui) mongo.yaml(3) rgw.yaml(ExternalName → ceph/) rabbitmq.yaml
@@ -68,7 +68,7 @@ dev 는 **전부 k8s 에서 돈다.** 처음(2026-10-03 오전)엔 앱 계층만
 - **Pinpoint**: **dev 에선 꺼 둔다(2026-10-04 결정 — APM 은 운영 환경에서만, dev 는 필요할 때 켠다; 메모리 상한 약 4.6GiB 를 Argo CD·GoCD 자리로).** 켜는 법은 아래 "Pinpoint 켜기/끄기". 켜면: JVM 13개에 에이전트(컬렉터와 같은 3.1.0, init 컨테이너가 jar 를 복사). 로그 MDC 옵션은 `-Dpinpoint.profiler.logback.logging.transactioninfo=true` 로 덮어써지지만 컬렉터 주소(`profiler.transport.grpc.collector.ip`, 기본 127.0.0.1)는 `-D` 로 안 바뀌어서 init 컨테이너가 설정 파일을 `pinpoint-collector` 로 고친다(`overlays/dev/pinpoint-agent-patch*.yaml`).
 - **롤아웃은 한 번에 하나씩.** (Argo CD 로 Sync 하면 JVM Deployment 의 `sync-wave` 1~13 이 이 순서를 자동으로 지킨다 — 아래 "Argo CD 로 배포". 손으로 `kubectl apply -k` 할 때만 아래 절차.) 단일 노드·빠듯한 메모리에서 13개 Deployment 의 pod 템플릿을 한꺼번에 바꾸면(공통 패치 수정 + `apply -k`) maxSurge 1 때문에 JVM 이 26개가 되어 노드가 멈춘다(2026-10-03 실제로 API 서버가 응답 불능). 공통 변경은:
   ```bash
-  J=(config-service gateway-service auth-service member-service chat-service chat-store-service ws-service push-service profile-service storage-service point-service schedule-service commerce-service)
+  J=(config-service gateway-service auth-service member-service chat-service chat-store-service ws-service push-service profile-service storage-service point-service commerce-service)
   kubectl -n modu rollout pause deploy "${J[@]}"      # zsh 는 $J 를 단어로 안 나눈다 — 배열로
   kubectl apply -k overlays/dev
   for d in "${J[@]}"; do kubectl -n modu rollout resume deploy/$d; kubectl -n modu rollout status deploy/$d; done
@@ -81,8 +81,8 @@ dev 는 **전부 k8s 에서 돈다.** 처음(2026-10-03 오전)엔 앱 계층만
 | 항목 | 값 |
 |---|---|
 | 이미지 | `ghcr.io/tear94fall/modu-chat/<svc>`, `modu-platform/<svc>`, `modu-commerce/{commerce-service,web}`, `modu-admin/{modu-admin,modu-system,modu-internal}` — base 는 `develop`, 오버레이 `images:` 로 고정. `imagePullPolicy: IfNotPresent`, 공개 패키지라 imagePullSecrets 없음 |
-| Service | ClusterIP, 이름·포트 = compose 컨테이너 이름·포트 = config-repo `modu.services.*` (auth 9900, member 8080(+8082 management), chat 9090, chat-store 8100, ws 8090, push 9990, storage 9999, profile 8880, point 9600, schedule 8110, commerce 8200, config 8888, gateway 8000) |
-| env | `CONFIG_SERVER_URI=http://config-service:8888`; JPA 6개(chat·member·point·profile·push·schedule)는 `SPRING_DATASOURCE_{MASTER,REPLICA}_{URL,USERNAME}` (compose 의 `spring.datasource.master.url` 과 같은 값 — 점이 든 이름은 k8s env 이름으로 못 써서 relaxed-binding 형태); storage 는 `MINIO_ENDPOINT`; gateway 는 `ADMIN_ALLOWED_ORIGIN`; config 는 Secret 의 `ENCRYPT_KEY`·`INTERNAL_API_TOKEN` + `RABBITMQ_HOST` |
+| Service | ClusterIP, 이름·포트 = compose 컨테이너 이름·포트 = config-repo `modu.services.*` (auth 9900, member 8080(+8082 management), chat 9090, chat-store 8100, ws 8090, push 9990, storage 9999, profile 8880, point 9600, commerce 8200, config 8888, gateway 8000) |
+| env | `CONFIG_SERVER_URI=http://config-service:8888`; JPA 5개(chat·member·point·profile·push)는 `SPRING_DATASOURCE_{MASTER,REPLICA}_{URL,USERNAME}` (compose 의 `spring.datasource.master.url` 과 같은 값 — 점이 든 이름은 k8s env 이름으로 못 써서 relaxed-binding 형태); storage 는 `MINIO_ENDPOINT`; gateway 는 `ADMIN_ALLOWED_ORIGIN`; config 는 Secret 의 `ENCRYPT_KEY`·`INTERNAL_API_TOKEN` + `RABBITMQ_HOST` |
 | probe | startup: readiness 경로 5s×30 → readiness `/actuator/health/readiness`(20s 뒤 10s 마다, 6회) → liveness `/actuator/health/liveness`(60s 뒤 15s 마다, 3회). member-service 는 8082. nginx 는 `GET /` |
 | resources | JVM: requests 512Mi/250m, limits 1Gi(member·commerce 1280Mi), CPU limit 없음(compose `mem_reservation`/`mem_limit` 과 같음). nginx: 16Mi/50m, 64Mi |
 | 롤아웃 | RollingUpdate maxSurge 1 / maxUnavailable 0, `terminationGracePeriodSeconds 30`(graceful shutdown 20s) |
