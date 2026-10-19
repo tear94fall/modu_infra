@@ -1,0 +1,94 @@
+# Cloudflare Tunnel(2026-10-20) — dev 를 공인 주소로 내보낸다. 들어오는 포트를 열지 않고 파드가 Cloudflare 엣지로 나가는 연결을 맺는다.
+#   dev-api.joonsublim.com  → gateway-service:8000   (채팅·커머스 API, WebSocket /ws-service/modu-chat 포함)
+#   dev-shop.joonsublim.com → modu-commerce-web:80   (커머스 WebView 가 여는 페이지)
+#   joonsublim.com, www    → web-root:80            (루트 정적 소개 페이지, web-root.yaml)
+# 콘솔(8081/8084/8085)·Argo(8090)·설정 서버(8888)·관측 UI 는 일부러 넣지 않는다(할 일 0-3 — 관리 포트는 맥 loopback 만). 밖에서 써야 하면 Cloudflare Access 뒤에.
+# 터널은 `cloudflared tunnel create modu-dev`(맥, ~/.cloudflared/cert.pem 로그인 뒤)로 만들었고 DNS 는 `cloudflared tunnel route dns modu-dev <host>`.
+# 자격(<UUID>.json)은 Secret cloudflared(create-infra-secret.sh, k8s/cloudflared-credentials.json). 설정은 아래 ConfigMap — Git 이 원본이다(원격 관리 방식 아님).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloudflared
+  labels:
+    app: cloudflared
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: network
+data:
+  config.yml: |
+    tunnel: adb84055-a44b-4c0b-a7f7-5714025fa4ef
+    credentials-file: /etc/cloudflared/creds/credentials.json
+    # 들어오는 요청을 호스트 이름으로 나눈다. 위에서 아래로 첫 매칭. 마지막 404 규칙은 필수.
+    ingress:
+      - hostname: dev-api.joonsublim.com
+        service: http://gateway-service:8000
+      - hostname: dev-shop.joonsublim.com
+        service: http://modu-commerce-web:80
+      - hostname: joonsublim.com
+        service: http://web-root:80
+      - hostname: www.joonsublim.com
+        service: http://web-root:80
+      - service: http_status:404
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  labels:
+    app: cloudflared
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: network
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+        app.kubernetes.io/name: cloudflared
+        app.kubernetes.io/component: network
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: cloudflared
+        image: cloudflare/cloudflared:2026.10.1
+        imagePullPolicy: IfNotPresent
+        args:
+        - tunnel
+        - --config
+        - /etc/cloudflared/config/config.yml
+        - --metrics
+        - 0.0.0.0:2000
+        - --no-autoupdate
+        - run
+        ports:
+        - name: metrics
+          containerPort: 2000
+        # /ready 는 엣지 연결이 하나라도 살아 있을 때 200.
+        livenessProbe:
+          httpGet: {path: /ready, port: metrics}
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet: {path: /ready, port: metrics}
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        resources:
+          requests: {memory: 32Mi, cpu: 20m}
+          limits: {memory: 128Mi}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/cloudflared/config
+          readOnly: true
+        - name: creds
+          mountPath: /etc/cloudflared/creds
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: cloudflared
+      - name: creds
+        secret:
+          secretName: cloudflared
