@@ -112,7 +112,7 @@ replicas:
 #  - path: pinpoint-agent-patch.yaml
 #    target:
 #      kind: Deployment
-#      name: "(auth|chat|chat-store|member|point|profile|push|schedule|ws|gateway|commerce)-service"
+#      name: "(auth|chat|chat-store|member|point|profile|push|ws|gateway|commerce)-service"
 #  - path: pinpoint-agent-patch-append.yaml
 #    target:
 #      kind: Deployment
