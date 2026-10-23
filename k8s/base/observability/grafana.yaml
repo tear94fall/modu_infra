@@ -82,6 +82,8 @@ spec:
                 path: dashboards/json/modu-overview.json
               - key: modu-service.json
                 path: dashboards/json/modu-service.json
+              - key: modu-status.json
+                path: dashboards/json/modu-status.json
           - configMap:
               name: grafana-dashboards-jvm
               items:

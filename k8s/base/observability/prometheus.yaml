@@ -76,11 +76,19 @@ data:
         static_configs:
           - targets: [localhost:9090]
 
+      # 앱 서비스 전부(메신저·커머스·플랫폼). relabel 로 instance(이름:포트)에서 service 라벨을 뽑는다 — 커머스는 application 태그가 없고,
+      # up 같은 합성 지표에는 application 이 없어서 대시보드는 service 로 묶는다. config-service 는 /actuator/prometheus 만 인증 없이 연다(2026-10-23).
       - job_name: modu-messenger
         metrics_path: /actuator/prometheus
+        relabel_configs:
+          - source_labels: [__address__]
+            regex: ([^:]+):\d+
+            target_label: service
         static_configs:
           - targets:
               - gateway-service:8000
+              - deploy-service:8900
+              - batch-service:8910
               - auth-service:9900
               - member-service:8082
               - chat-service:9090
@@ -103,6 +111,10 @@ data:
               - mysql-chat:3306
               - mysql-push:3306
               - mysql-profile:3306
+              - mysql-member-replica:3306
+              - mysql-chat-replica:3306
+              - mysql-push-replica:3306
+              - mysql-profile-replica:3306
         relabel_configs:
           - source_labels: [__address__]
             target_label: __param_target
@@ -119,6 +131,24 @@ data:
         static_configs:
           - targets:
               - mysql-commerce:3306
+              - mysql-commerce-replica:3306
+        relabel_configs:
+          - source_labels: [__address__]
+            target_label: __param_target
+          - source_labels: [__param_target]
+            target_label: instance
+          - target_label: __address__
+            replacement: mysqld-exporter:9104
+
+      # mysql-platform 도 root 비밀번호가 따로(PLATFORM_DB_PASSWORD, .my.cnf [client.platform]). 복제본까지 — 복제 지연이 상태판에 나온다.
+      - job_name: mysql-platform
+        metrics_path: /probe
+        params:
+          auth_module: [client.platform]
+        static_configs:
+          - targets:
+              - mysql-platform:3306
+              - mysql-platform-replica:3306
         relabel_configs:
           - source_labels: [__address__]
             target_label: __param_target
@@ -163,6 +193,49 @@ data:
       - job_name: rabbitmq
         static_configs:
           - targets: [rabbitmq:15692]
+
+      # JVM 이 아닌 우리 파드들 — cloudflared(터널 연결·요청·오류, dev 오버레이의 Service), otel-collector(로그 레코드 받음/보냄/실패).
+      # 같은 service 라벨 규칙으로 상태판 표에 들어간다.
+      - job_name: cloudflared
+        relabel_configs:
+          - source_labels: [__address__]
+            regex: ([^:]+):\d+
+            target_label: service
+        static_configs:
+          - targets: [cloudflared:2000]
+      - job_name: otel-collector
+        relabel_configs:
+          - source_labels: [__address__]
+            regex: ([^:]+):\d+
+            target_label: service
+        static_configs:
+          - targets: [otel-collector:8888]
+
+      # 쿠버네티스 상태(ready·재시작·이미지 태그·레플리카) — kube-state-metrics.yaml. 상태판이 쓴다.
+      - job_name: kube-state-metrics
+        static_configs:
+          - targets: [kube-state-metrics:8080]
+
+      # kubelet 자체 지표 중 PVC 사용량(kubelet_volume_stats_*)만 — cadvisor 와 같은 API 서버 프록시 경로. 나머지는 버린다(카디널리티).
+      - job_name: kubelet
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        authorization:
+          credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/$1/proxy/metrics
+        metric_relabel_configs:
+          - source_labels: [__name__]
+            regex: kubelet_volume_stats_(used|capacity|available)_bytes
+            action: keep
 ---
 # dev 오버레이가 LoadBalancer 19090 → 9090 으로 연다(compose 호스트 포트 그대로).
 apiVersion: apps/v1
