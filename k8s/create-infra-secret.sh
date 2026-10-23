@@ -81,7 +81,8 @@ MY_CNF="$(mktemp "${TMPDIR:-/tmp}/my.cnf.XXXXXX")"
 trap 'rm -f "$MY_CNF"' EXIT
 {
   printf '[client]\nuser = root\npassword = %s\n\n' "$(value_of "$INFRA_ENV" MYSQL_ROOT_PASSWORD)"
-  printf '[client.commerce]\nuser = root\npassword = %s\n' "$(value_of "$INFRA_ENV" COMMERCE_DB_PASSWORD)"
+  printf '[client.commerce]\nuser = root\npassword = %s\n\n' "$(value_of "$INFRA_ENV" COMMERCE_DB_PASSWORD)"
+  printf '[client.platform]\nuser = root\npassword = %s\n' "$(value_of "$INFRA_ENV" PLATFORM_DB_PASSWORD)"
 } > "$MY_CNF"
 
 kubectl apply -f "$HERE/base/namespace.yaml" >/dev/null

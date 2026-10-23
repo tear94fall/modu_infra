@@ -1,0 +1,99 @@
+# kube-state-metrics(2026-10-23) — 파드 ready·재시작 횟수·이미지 태그·Deployment 레플리카 같은 "쿠버네티스 상태"를 Prometheus 지표로.
+# Grafana "모두 서비스 상태판"(grafana/dashboards/modu-status.json)이 쓴다. kubelet cAdvisor 는 k3s(docker 런타임)에서 pod·container 라벨 없이
+# cgroup id 만 주어 파드별 자원은 못 보지만, 상태·재시작·이미지는 여기서 나온다. modu 네임스페이스만 본다(--namespaces) — 그래서 Role 로 충분.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-state-metrics
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/component: observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kube-state-metrics
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/component: observability
+rules:
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims]
+    verbs: [list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets, statefulsets]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kube-state-metrics
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/component: observability
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  labels:
+    app: kube-state-metrics
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/component: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: kube-state-metrics
+        app.kubernetes.io/name: kube-state-metrics
+        app.kubernetes.io/component: observability
+    spec:
+      serviceAccountName: kube-state-metrics
+      enableServiceLinks: false
+      containers:
+      - name: kube-state-metrics
+        image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0
+        imagePullPolicy: IfNotPresent
+        args:
+        - --namespaces=modu
+        - --resources=deployments,pods,replicasets,statefulsets,persistentvolumeclaims
+        ports:
+        - name: http-metrics
+          containerPort: 8080
+        - name: telemetry
+          containerPort: 8081
+        livenessProbe:
+          httpGet: {path: /livez, port: http-metrics}
+          initialDelaySeconds: 5
+        readinessProbe:
+          httpGet: {path: /readyz, port: telemetry}
+          initialDelaySeconds: 5
+        resources:
+          requests: {memory: 40Mi, cpu: 10m}
+          limits: {memory: 128Mi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  labels:
+    app.kubernetes.io/name: kube-state-metrics
+    app.kubernetes.io/component: observability
+spec:
+  selector:
+    app: kube-state-metrics
+  ports:
+  - name: http-metrics
+    port: 8080
+    targetPort: http-metrics

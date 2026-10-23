@@ -92,3 +92,20 @@ spec:
       - name: creds
         secret:
           secretName: cloudflared
+---
+# Prometheus 잡 cloudflared(base prometheus.yaml)가 긁는 입구 — 터널 연결 수·요청 수·오류. dev 에만 터널이 있어 base 에선 이 타겟이 down 으로 보인다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cloudflared
+  labels:
+    app: cloudflared
+    app.kubernetes.io/name: cloudflared
+    app.kubernetes.io/component: network
+spec:
+  selector:
+    app: cloudflared
+  ports:
+  - name: metrics
+    port: 2000
+    targetPort: metrics

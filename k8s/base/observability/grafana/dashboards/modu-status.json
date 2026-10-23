@@ -1,0 +1,1279 @@
+{
+  "uid": "modu-status",
+  "title": "모두 서비스 상태판",
+  "tags": [
+    "modu"
+  ],
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "서비스 UP / DOWN",
+      "description": "JVM 서비스·cloudflared·otel-collector 는 Prometheus 스크레이프(up), 콘솔·웹(nginx)은 지표가 없어 kube-state-metrics 의 ready 레플리카로 판단한다.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (service) (up{job=~\"modu-messenger|cloudflared|otel-collector\"}) or max by (service) (label_replace(kube_deployment_status_replicas_ready{namespace=\"modu\",deployment=~\"(modu-admin|modu-system|modu-internal|modu-commerce-web|web-root)\"}, \"service\", \"$1\", \"deployment\", \"(.*)\") > bool 0)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{service}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "서비스 한눈에",
+      "description": "서비스마다 한 줄(콘솔·웹 nginx 는 UP·ready·재시작·이미지만): UP(Prometheus 스크레이프) · ready/desired(kube-state-metrics Deployment) · 24시간 재시작 · 가동 시간 · 요청률 · 5xx 비율 · ERROR 로그 · JVM 힙 · CPU · 배포된 이미지 태그. 색은 임계값(재시작≥1 주황·≥3 빨강, 5xx≥0.5% 주황, 힙≥80% 주황).",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 13
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (service) (up{job=~\"modu-messenger|cloudflared|otel-collector\"}) or max by (service) (label_replace(kube_deployment_status_replicas_ready{namespace=\"modu\",deployment=~\"(modu-admin|modu-system|modu-internal|modu-commerce-web|web-root)\"}, \"service\", \"$1\", \"deployment\", \"(.*)\") > bool 0)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "B",
+          "expr": "max by (service) (label_replace(kube_deployment_status_replicas_ready{namespace=\"modu\",deployment=~\"((auth|member|chat|chat-store|profile|push|storage|ws|point|commerce|gateway|config|deploy|batch)-service|modu-admin|modu-system|modu-internal|modu-commerce-web|web-root|cloudflared|otel-collector)\"}, \"service\", \"$1\", \"deployment\", \"(.*)\"))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "expr": "max by (service) (label_replace(kube_deployment_spec_replicas{namespace=\"modu\",deployment=~\"((auth|member|chat|chat-store|profile|push|storage|ws|point|commerce|gateway|config|deploy|batch)-service|modu-admin|modu-system|modu-internal|modu-commerce-web|web-root|cloudflared|otel-collector)\"}, \"service\", \"$1\", \"deployment\", \"(.*)\"))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "D",
+          "expr": "sum by (service) (label_replace(increase(kube_pod_container_status_restarts_total{namespace=\"modu\",pod=~\"((auth|member|chat|chat-store|profile|push|storage|ws|point|commerce|gateway|config|deploy|batch)-service|modu-admin|modu-system|modu-internal|modu-commerce-web|web-root|cloudflared|otel-collector)-[a-z0-9]+(-[a-z0-9]+)?\"}[24h]), \"service\", \"$1\", \"pod\", \"^(.*?)-[a-z0-9]+(-[a-z0-9]+)?$\"))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "E",
+          "expr": "max by (service) (process_uptime_seconds{job=\"modu-messenger\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "F",
+          "expr": "sum by (service) (rate(http_server_requests_seconds_count{job=\"modu-messenger\"}[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "G",
+          "expr": "100 * sum by (service) (rate(http_server_requests_seconds_count{job=\"modu-messenger\",status=~\"5..\"}[5m])) / clamp_min(sum by (service) (rate(http_server_requests_seconds_count{job=\"modu-messenger\"}[5m])), 0.0001)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "H",
+          "expr": "60 * sum by (service) (rate(logback_events_total{job=\"modu-messenger\",level=\"error\"}[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "I",
+          "expr": "100 * sum by (service) (jvm_memory_used_bytes{job=\"modu-messenger\",area=\"heap\"}) / sum by (service) (jvm_memory_max_bytes{job=\"modu-messenger\",area=\"heap\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "J",
+          "expr": "100 * max by (service) (process_cpu_usage{job=\"modu-messenger\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        },
+        {
+          "refId": "K",
+          "expr": "max by (service, image) (label_replace(kube_pod_container_info{namespace=\"modu\",pod=~\"((auth|member|chat|chat-store|profile|push|storage|ws|point|commerce|gateway|config|deploy|batch)-service|modu-admin|modu-system|modu-internal|modu-commerce-web|web-root|cloudflared|otel-collector)-[a-z0-9]+(-[a-z0-9]+)?\"}, \"service\", \"$1\", \"pod\", \"^(.*?)-[a-z0-9]+(-[a-z0-9]+)?$\"))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "filterable": false
+          },
+          "decimals": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "UP"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "0": {
+                        "text": "DOWN",
+                        "color": "red",
+                        "index": 0
+                      },
+                      "1": {
+                        "text": "UP",
+                        "color": "green",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "재시작 24h"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    },
+                    {
+                      "color": "red",
+                      "value": 3
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ready"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 60
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "desired"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "가동 시간"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dtdhms"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 100
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "req/s"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "5xx %"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0.5
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ERROR/분"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 0.1
+                    },
+                    {
+                      "color": "red",
+                      "value": 5
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "힙 %"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "transparent",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 80
+                    },
+                    {
+                      "color": "red",
+                      "value": 90
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "CPU %"
+            },
+            "properties": [
+              {
+                "id": "decimals",
+                "value": 0
+              },
+              {
+                "id": "custom.width",
+                "value": 70
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "이미지"
+            },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "regex",
+                    "options": {
+                      "pattern": ".*:([^:]+)$",
+                      "result": {
+                        "text": "$1",
+                        "index": 0
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false
+        }
+      },
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "pattern": "^(service|image|Value #.*)$"
+            }
+          }
+        },
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Value #K": true
+            },
+            "indexByName": {
+              "service": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7,
+              "Value #H": 8,
+              "Value #I": 9,
+              "Value #J": 10,
+              "image": 11
+            },
+            "renameByName": {
+              "Value #A": "UP",
+              "Value #B": "ready",
+              "Value #C": "desired",
+              "Value #D": "재시작 24h",
+              "Value #E": "가동 시간",
+              "Value #F": "req/s",
+              "Value #G": "5xx %",
+              "Value #H": "ERROR/분",
+              "Value #I": "힙 %",
+              "Value #J": "CPU %",
+              "image": "이미지",
+              "service": "서비스"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": {
+            "sort": [
+              {
+                "field": "서비스"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "컨테이너 재시작 (5분 단위)",
+      "description": "5분 창에서 늘어난 재시작 횟수. 올라오면 그 서비스 로그부터(crashloop·OOM).",
+      "gridPos": {
+        "x": 0,
+        "y": 18,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (label_replace(increase(kube_pod_container_status_restarts_total{namespace=\"modu\",pod=~\"((auth|member|chat|chat-store|profile|push|storage|ws|point|commerce|gateway|config|deploy|batch)-service|modu-admin|modu-system|modu-internal|modu-commerce-web|web-root|cloudflared|otel-collector)-[a-z0-9]+(-[a-z0-9]+)?\"}[5m]), \"service\", \"$1\", \"pod\", \"^(.*?)-[a-z0-9]+(-[a-z0-9]+)?$\"))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "noValue": "재시작 없음"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "5xx 비율 (%)",
+      "description": "",
+      "gridPos": {
+        "x": 8,
+        "y": 18,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (service) (rate(http_server_requests_seconds_count{job=\"modu-messenger\",status=~\"5..\"}[5m])) / clamp_min(sum by (service) (rate(http_server_requests_seconds_count{job=\"modu-messenger\"}[5m])), 0.0001)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "ERROR 로그 (건/분)",
+      "description": "logback_events_total — 자세한 내용은 OpenSearch Dashboards(level:ERROR).",
+      "gridPos": {
+        "x": 16,
+        "y": 18,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "60 * sum by (service) (rate(logback_events_total{job=\"modu-messenger\",level=\"error\"}[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "응답 시간 p95",
+      "description": "",
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_server_requests_seconds_bucket{job=\"modu-messenger\"}[5m])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "JVM 힙 사용률 (%)",
+      "description": "",
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (service) (jvm_memory_used_bytes{job=\"modu-messenger\",area=\"heap\"}) / sum by (service) (jvm_memory_max_bytes{job=\"modu-messenger\",area=\"heap\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "데이터 저장소 UP / DOWN",
+      "description": "MySQL 은 exporter 가 붙을 수 있으면 UP(기본 6 + 복제본 6). Kafka 는 kafka-exporter 스크레이프 기준.",
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 24,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "mysql_up",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{instance}}",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "B",
+          "expr": "mongodb_up",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "mongo",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "C",
+          "expr": "redis_up",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "redis",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "D",
+          "expr": "up{job=\"kafka\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "kafka",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "E",
+          "expr": "up{job=\"rabbitmq\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "rabbitmq",
+          "instant": true,
+          "range": false
+        },
+        {
+          "refId": "F",
+          "expr": "up{job=\"kube-state-metrics\"}",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "kube-state-metrics",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red",
+                  "index": 0
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green",
+                  "index": 1
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "value_and_name",
+        "justifyMode": "center",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "MySQL 복제 지연 (초)",
+      "description": "복제본 6개. 값이 없으면 복제 스레드가 멈춘 것(mysql_slave_status_slave_sql_running 확인).",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "mysql_slave_status_seconds_behind_master",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 30
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Kafka 컨슈머 lag",
+      "description": "그룹별 밀린 레코드 수. 쌓이면 그 컨슈머(서비스)가 멈춘 것. ws-service.fanout.* 는 인스턴스마다 하나.",
+      "gridPos": {
+        "x": 8,
+        "y": 40,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (consumergroup) (kafka_consumergroup_lag)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "legendFormat": "{{consumergroup}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 1000
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "디스크 사용률 (%)",
+      "description": "노드 디스크(cAdvisor 루트 cgroup 의 파일시스템 — /dev/vdb1 이 Colima 데이터 디스크, local-path PV 가 여기 산다)와 kubelet 이 통계를 주는 PVC(Ceph 등; local-path 는 hostPath 라 안 나온다). 80% 넘으면 정리(OpenSearch 인덱스·MySQL 바이너리 로그 먼저).",
+      "gridPos": {
+        "x": 16,
+        "y": 40,
+        "w": 8,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "100 * container_fs_usage_bytes{id=\"/\",device=~\"/dev/(root|vd[a-z]+[0-9]*)\"} / container_fs_limit_bytes{id=\"/\",device=~\"/dev/(root|vd[a-z]+[0-9]*)\"}",
+          "legendFormat": "node {{device}}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "100 * kubelet_volume_stats_used_bytes{namespace=\"modu\"} / kubelet_volume_stats_capacity_bytes{namespace=\"modu\"}",
+          "legendFormat": "pvc {{persistentvolumeclaim}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 80
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    }
+  ],
+  "description": "서비스 15개를 한눈에 — UP·ready·재시작·이미지 태그(kube-state-metrics) + 요청·오류·JVM(actuator) + 데이터 저장소·복제 지연·Kafka lag·PVC. modu_infra k8s/base/observability/grafana/dashboards/modu-status.json 이 원본."
+}
