@@ -11,6 +11,7 @@ namespace: modu
 resources:
   - ../../base
   - loadbalancers.yaml
+  - db-loadbalancers.yaml # MySQL 12 + Mongo 를 맥 127.0.0.1 로(DataGrip, 2026-10-23)
   - storageclass.yaml     # Colima(k3s)용 StorageClass `standard` (2026-10-06)
   - cloudflared.yaml      # Cloudflare Tunnel — joonsublim.com, dev-api/dev-shop (2026-10-20)
   - web-root.yaml         # 루트 도메인 정적 소개 페이지 https://joonsublim.com

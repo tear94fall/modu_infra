@@ -12,7 +12,8 @@ PUBLIC_PORTS="8000 8082"
 # 맥에서만 쓰는 포트(브라우저·확인 도구). VM 의 127.0.0.1 에만 열면 Lima 가 맥의 127.0.0.1 로만 넘긴다
 # (lima.yaml 의 0.0.0.0 규칙은 guestIPMustBeZero 라 루프백 리스너에는 안 맞고, 127.0.0.1→127.0.0.1 규칙이 걸린다).
 # 콘솔3(8081·8084·8085) config(8888) OpenSearch(9200·5601) Grafana(3000) Prometheus(19090) kafka-ui(9009) RabbitMQ(15672) Argo(8090) RGW(7480) Ceph대시보드(7001)
-LOCAL_PORTS="8081 8084 8085 8888 5601 9200 3000 19090 9009 15672 8090 7480 7001"
+# DB(db-loadbalancers.yaml): MySQL member 3306 chat 3307 push 3308 profile 3309 platform 3310 commerce 3316, 복제본 3326-3330·3317, Mongo 27017
+LOCAL_PORTS="8081 8084 8085 8888 5601 9200 3000 19090 9009 15672 8090 7480 7001 3306 3307 3308 3309 3310 3316 3326 3327 3328 3329 3330 3317 27017"
 PORTS="$PUBLIC_PORTS $LOCAL_PORTS"
 # colima 버전에 따라 키 이름이 다르다(예전 ip_address → 지금 address). 둘 다 보고, 그래도 없으면 VM 안에서 직접 읽는다.
 VM_IP=${VM_IP:-$(colima ls --json 2>/dev/null | python3 -c 'import sys,json

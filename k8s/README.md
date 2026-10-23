@@ -19,6 +19,7 @@ k8s/
     loadbalancers.yaml               # Mac 에서 들어오는 입구: 앱 6개 + 인프라 UI 8개(compose 와 같은 호스트 포트)
     storageclass.yaml                # k3s 용 StorageClass `standard`(local-path) — base 의 PVC 이름을 안 바꾸려고
     colima-ports.sh                  # LB 포트를 Mac(localhost·LAN IP)으로 내보내는 nginx(stream) 컨테이너
+    db-loadbalancers.yaml            # MySQL 12 + Mongo 를 맥 127.0.0.1 로(DataGrip 등) — 아래 "포트"
     cloudflared.yaml                 # Cloudflare Tunnel 파드 + ingress 설정(ConfigMap) — 아래 "바깥에서 들어오는 길"
     web-root.yaml                    # 루트 도메인 정적 소개 페이지(nginx) — https://joonsublim.com
     pinpoint-agent-patch*.yaml       # JVM Deployment 에 Pinpoint 에이전트(init 컨테이너 + JDK_JAVA_OPTIONS) — dev 는 2026-10-04 부터 꺼 둠(아래 "Pinpoint 켜기/끄기")
@@ -148,7 +149,21 @@ kubectl -n modu get pods -o wide
 | http://localhost:7480 / 7001 | Ceph RGW(S3) / Ceph 대시보드 |
 | http://localhost:15672 | RabbitMQ 관리 화면 |
 
-개별 서비스 포트(9900, 8080 …)와 **MySQL·Mongo·Redis·Kafka** 는 바깥에 열지 않는다. 필요하면 port-forward:
+**MySQL·Mongo 는 맥 127.0.0.1 에만 연다**(`overlays/dev/db-loadbalancers.yaml`, 2026-10-23 — DataGrip 등 로컬 도구용. LAN·폰에는 안 보인다):
+
+| 127.0.0.1 포트 | 대상 | 127.0.0.1 포트 | 대상 |
+|---|---|---|---|
+| 3306 | mysql-member (`modu-chat`, `modu-point`) | 3326 | mysql-member-replica |
+| 3307 | mysql-chat (`modu-chat`) | 3327 | mysql-chat-replica |
+| 3308 | mysql-push (`modu-chat`) | 3328 | mysql-push-replica |
+| 3309 | mysql-profile (`modu-chat`) | 3329 | mysql-profile-replica |
+| 3310 | mysql-platform (`modu-platform`) | 3330 | mysql-platform-replica |
+| 3316 | mysql-commerce (`commerce`) | 3317 | mysql-commerce-replica |
+| 27017 | mongo-01 (`directConnection=true`, authSource admin) | | |
+
+root 비밀번호는 Secret `infra` 의 `MYSQL_ROOT_PASSWORD`(member·chat·push·profile), `COMMERCE_DB_PASSWORD`(commerce), `PLATFORM_DB_PASSWORD`(platform), Mongo 는 `admin`/`MONGO_ROOT_PASSWORD`. DataGrip 프로젝트 `~/DataGripProjects/jslim` 에 이 13개가 들어 있다(비밀번호는 macOS 키체인 `IntelliJ Platform DB — <uuid>`).
+
+개별 서비스 포트(9900, 8080 …)와 **Redis·Kafka** 는 바깥에 열지 않는다. 필요하면 port-forward:
 
 ```bash
 kubectl -n modu port-forward svc/member-service 8080:8080

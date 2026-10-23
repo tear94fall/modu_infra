@@ -1,0 +1,212 @@
+# DB 를 맥에서 바로 붙을 수 있게(DataGrip 등, 2026-10-23). 포트는 compose 시절 호스트 포트 그대로(member 3306, chat 3307, push 3308, profile 3309,
+# commerce 3316, 복제본은 +20, commerce 복제본 3317), platform 은 3310/3330, Mongo 는 mongo-01 에 27017(directConnection).
+# 전부 colima-ports.sh 의 LOCAL_PORTS(127.0.0.1 전용) — LAN·폰에는 안 보인다. Redis 클러스터는 노드가 클러스터 안 이름을 광고해 밖에서 못 쓴다(README "포트").
+# 셀렉터는 StatefulSet 파드 라벨(app.kubernetes.io/name) — base 의 ClusterIP Service 와 같은 파드를 가리킨다.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-member-lb
+  labels:
+    app.kubernetes.io/name: mysql-member
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-member
+  ports:
+  - name: mysql
+    port: 3306
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-chat-lb
+  labels:
+    app.kubernetes.io/name: mysql-chat
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-chat
+  ports:
+  - name: mysql
+    port: 3307
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-push-lb
+  labels:
+    app.kubernetes.io/name: mysql-push
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-push
+  ports:
+  - name: mysql
+    port: 3308
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-profile-lb
+  labels:
+    app.kubernetes.io/name: mysql-profile
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-profile
+  ports:
+  - name: mysql
+    port: 3309
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-platform-lb
+  labels:
+    app.kubernetes.io/name: mysql-platform
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-platform
+  ports:
+  - name: mysql
+    port: 3310
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-commerce-lb
+  labels:
+    app.kubernetes.io/name: mysql-commerce
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-commerce
+  ports:
+  - name: mysql
+    port: 3316
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-member-replica-lb
+  labels:
+    app.kubernetes.io/name: mysql-member-replica
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-member-replica
+  ports:
+  - name: mysql
+    port: 3326
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-chat-replica-lb
+  labels:
+    app.kubernetes.io/name: mysql-chat-replica
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-chat-replica
+  ports:
+  - name: mysql
+    port: 3327
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-push-replica-lb
+  labels:
+    app.kubernetes.io/name: mysql-push-replica
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-push-replica
+  ports:
+  - name: mysql
+    port: 3328
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-profile-replica-lb
+  labels:
+    app.kubernetes.io/name: mysql-profile-replica
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-profile-replica
+  ports:
+  - name: mysql
+    port: 3329
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-platform-replica-lb
+  labels:
+    app.kubernetes.io/name: mysql-platform-replica
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-platform-replica
+  ports:
+  - name: mysql
+    port: 3330
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-commerce-replica-lb
+  labels:
+    app.kubernetes.io/name: mysql-commerce-replica
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mysql-commerce-replica
+  ports:
+  - name: mysql
+    port: 3317
+    targetPort: 3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-01-lb
+  labels:
+    app.kubernetes.io/name: mongo-01
+    app.kubernetes.io/component: db-local
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: mongo-01
+  ports:
+  - name: mongo
+    port: 27017
+    targetPort: 27017
