@@ -84,7 +84,8 @@ target() {
     chat|push|profile) messenger "$1" "modu-chat" "modu-chat" ;;
     commerce) setup commerce "$(secret_val COMMERCE_REPL_PASSWORD)" commerce_ro "$(secret_val COMMERCE_RO_PASSWORD)" commerce commerce ;;
     # 플랫폼 서비스 DB(deploy-service 배포 이력). root 는 파드 env(PLATFORM_DB_PASSWORD 에서 온 MYSQL_ROOT_PASSWORD).
-    platform) setup platform "$(secret_val PLATFORM_REPL_PASSWORD)" platform_ro "$(secret_val PLATFORM_RO_PASSWORD)" modu-platform modu-platform ;;
+    # platform 은 Temporal 스키마 둘도 함께 덤프(2026-11-14) — temporal-db-setup.sh 뒤에 돌린다. 읽기 계정 platform_ro 는 modu-platform 만.
+    platform) setup platform "$(secret_val PLATFORM_REPL_PASSWORD)" platform_ro "$(secret_val PLATFORM_RO_PASSWORD)" 'modu-platform temporal temporal_visibility' modu-platform ;;
     messenger) for t in member chat push profile; do target "$t"; done ;;
     all)       for t in member chat push profile commerce platform; do target "$t"; done ;;
     *) echo "사용: sh data/mysql/replica-setup.sh member|chat|push|profile|commerce|platform|messenger|all" >&2; exit 2 ;;

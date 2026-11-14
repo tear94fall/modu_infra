@@ -11,3 +11,4 @@ resources:
   - mongo.yaml
   - rgw.yaml
   - rabbitmq.yaml
+  - temporal.yaml

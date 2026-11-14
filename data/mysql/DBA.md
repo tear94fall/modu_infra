@@ -113,6 +113,7 @@ gh-ost 가 **못 하는 것**: FK 있는 테이블(우리는 없음), PK/유니�
 스키마는 **사람(DBA)이 손으로 적용한다** — 앱은 `ddl-auto: validate` 만 하고, MySQL init 스크립트(`/docker-entrypoint-initdb.d`)도 두지 않는다. 기준선 파일 하나만 진실이라 두 군데가 어긋날 일이 없다.
 
 1. 소스 DB 가 뜨면: `sh data/mysql/apply-baseline.sh <instance>` (예: `platform`). 이미 표가 있으면 건너뛴다.
+   - platform 은 이어서 `sh data/mysql/temporal-db-setup.sh` — Temporal 의 DB `temporal`·`temporal_visibility` 와 계정만 만든다. **표는 예외**: 벤더 도구(temporal-sql-tool, `k8s/base/data/temporal.yaml` initContainer)가 만들고 버전을 올리므로 기준선·gh-ost 절차 대상이 아니다(2026-11-14).
 2. 데이터가 있으면 덤프 복원(이 경우 1 은 필요 없다 — 덤프에 스키마가 들어 있다).
 3. 레플리카: `sh data/mysql/replica-setup.sh <instance>` — 소스를 덤프해 레플리카에 싣고 복제를 건다.
 4. 그다음 앱을 띄운다(validate 가 표를 찾는다).
