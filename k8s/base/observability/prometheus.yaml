@@ -210,6 +210,14 @@ data:
             target_label: service
         static_configs:
           - targets: [otel-collector:8888]
+      # Temporal 서버(base/data/temporal.yaml) — PROMETHEUS_ENDPOINT 0.0.0.0:8000. 2026-11-14
+      - job_name: temporal
+        relabel_configs:
+          - source_labels: [__address__]
+            regex: ([^:]+):\d+
+            target_label: service
+        static_configs:
+          - targets: [temporal:8000]
 
       # 쿠버네티스 상태(ready·재시작·이미지 태그·레플리카) — kube-state-metrics.yaml. 상태판이 쓴다.
       - job_name: kube-state-metrics

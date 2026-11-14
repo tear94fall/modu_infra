@@ -58,7 +58,7 @@ colima stop | colima status | colima ssh -- free -m     # 멈추기·상태·VM 
 1. Docker Desktop 에서 덤프: MySQL 5 소스(`mysqldump --databases … --set-gtid-purged=OFF`), Mongo(`mongodump --archive --gzip`), Ceph 버킷(rclone 파드 → tar), RGW 사용자 키(Secret), Dashboards 저장 객체(`/api/saved_objects/_export`) → `~/modu-data/backup/2026-10-06-colima/`.
 2. `colima start …` → `kubectl apply -f overlays/dev/storageclass.yaml` → `kubectl create ns modu` → `./create-infra-secret.sh` + Secret `config-service` → `kubectl apply -k overlays/dev` 하고 **앱 Deployment 17개는 replicas 0** 으로(인프라 먼저).
 3. Argo(`cicd/argocd`, 두 번), Ceph(`k8s/ceph`, 두 번; 그 전에 Secret `rgw-storage-service-keys` 를 백업 키로 만들면 RGW 사용자 키가 그대로라 config-repo 를 안 건드린다).
-4. MySQL 덤프 적재(덤프가 없는 새 DB 는 `sh data/mysql/apply-baseline.sh <instance>` 로 기준선만) → `sh data/mysql/replica-setup.sh all` → Mongo `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh` + `mongorestore --nsExclude 'admin.*'` → Ceph 버킷 rclone 파드로 복원 → Dashboards `_import`.
+4. MySQL 덤프 적재(덤프가 없는 새 DB 는 `sh data/mysql/apply-baseline.sh <instance>` 로 기준선만) → `sh data/mysql/temporal-db-setup.sh`(Temporal DB 두 개·계정, 표는 Temporal 이 만든다) → `sh data/mysql/replica-setup.sh all` → Mongo `kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh` + `mongorestore --nsExclude 'admin.*'` → Ceph 버킷 rclone 파드로 복원 → Dashboards `_import`.
 5. `kubectl apply -k ~/workspace/modu_platform`(config-repo ConfigMap) → 앱을 config → gateway → 3개씩 순서로 replicas 1 → `colima-ports.sh` → Argo 세 Application Sync(입양) → Flip3 확인.
 
 **밟은 것**: ① Docker Desktop 을 "종료"해도 `com.docker.backend` 가 남아 8000·8090 을 잡고 있었다 — `pkill -f com.docker.backend`. ② Lima 는 "소켓으로 듣는" 게스트 포트만 포워딩하므로 k3s ServiceLB(iptables) 포트는 Mac 에 안 보인다 → `colima-ports.sh`. ③ kustomize 원격 URL(Argo 공식 매니페스트)은 이미지 받는 중엔 git fetch 가 27초 타임아웃에 걸린다 — 재시도. ④ VM 에는 `$HOME` 만 마운트돼 있어 `mktemp`(/var/folders)로 만든 파일을 `docker -v` 로 못 넘긴다. ⑤ Rook 이 만드는 Secret `rook-ceph-object-user-modu-storage-service` 의 키가 실제 RGW 사용자 키(고정한 값)와 달랐다 — 실제 키는 `radosgw-admin --rgw-realm=modu --rgw-zonegroup=modu --rgw-zone=modu user info --uid=storage-service`(operator 파드)로 본다. config-repo 는 고정한 키라 맞다.
@@ -148,6 +148,7 @@ kubectl -n modu get pods -o wide
 | http://localhost:18080 | Pinpoint Web (→ 8080) |
 | http://localhost:7480 / 7001 | Ceph RGW(S3) / Ceph 대시보드 |
 | http://localhost:15672 | RabbitMQ 관리 화면 |
+| http://localhost:8233 | Temporal Web UI (맥 127.0.0.1 전용 — `colima-ports.sh` LOCAL_PORTS; 인증 없음) |
 
 **MySQL·Mongo 는 맥 127.0.0.1 에만 연다**(`overlays/dev/db-loadbalancers.yaml`, 2026-10-23 — DataGrip 등 로컬 도구용. LAN·폰에는 안 보인다):
 
@@ -159,7 +160,7 @@ kubectl -n modu get pods -o wide
 | 3309 | mysql-profile (`modu-chat`) | 3329 | mysql-profile-replica |
 | 3310 | mysql-platform (`modu-platform`) | 3330 | mysql-platform-replica |
 | 3316 | mysql-commerce (`commerce`) | 3317 | mysql-commerce-replica |
-| 27017 | mongo-01 (`directConnection=true`, authSource admin) | | |
+| 27017 | mongo-01 (`directConnection=true`, authSource admin) | 7233 | temporal gRPC(로컬 워커·`temporal` CLI) |
 
 root 비밀번호는 Secret `infra` 의 `MYSQL_ROOT_PASSWORD`(member·chat·push·profile), `COMMERCE_DB_PASSWORD`(commerce), `PLATFORM_DB_PASSWORD`(platform), Mongo 는 `admin`/`MONGO_ROOT_PASSWORD`. DataGrip 프로젝트 `~/DataGripProjects/jslim` 에 이 13개가 들어 있다(비밀번호는 macOS 키체인 `IntelliJ Platform DB — <uuid>`).
 
@@ -199,8 +200,8 @@ Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커
 | 구성 요소 | 종류 | 이미지 | Service:포트 | PVC | 메모리 req / limit |
 |---|---|---|---|---|---|
 | mysql-{member,chat,push,profile} + `-replica` | STS ×8 | mysql:8.0.32 | :3306 | 2Gi | 384Mi / 768Mi |
-| mysql-platform | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 플랫폼 서비스용(2026-10-07): deploy-service 배포 이력 `modu-platform.deployment`, batch-service 배치 `batch_job`·`batch_job_run`·`batch_job_change`·`shedlock`(2026-10-17). 소스(쓰기). 스키마는 새 클러스터면 `sh data/mysql/apply-baseline.sh platform` 으로 손으로(init 스크립트 없음), 계정 platform(PLATFORM_DB_*) |
-| mysql-platform-replica | STS | mysql:8.0.32 | :3306 | 1Gi | 256Mi / 512Mi | 레플리카(읽기, server-id 25, super_read_only). 복제·읽기 계정 platform_ro 는 `sh data/mysql/replica-setup.sh platform`(PLATFORM_REPL/RO_PASSWORD). deploy-service 의 이력 목록 조회가 여기로 |
+| mysql-platform | STS | mysql:8.0.32 | :3306 | 1Gi | 384Mi / 768Mi | 플랫폼 서비스용(2026-10-07): deploy-service 배포 이력 `modu-platform.deployment`, batch-service 배치 `batch_job`·`batch_job_run`·`batch_job_change`·`shedlock`(2026-10-17). 소스(쓰기). 스키마는 새 클러스터면 `sh data/mysql/apply-baseline.sh platform` 으로 손으로(init 스크립트 없음), 계정 platform(PLATFORM_DB_*) + Temporal 스키마 `temporal`·`temporal_visibility`(2026-11-14 — 표는 Temporal 도구가 관리, 기준선·gh-ost 대상 아님; DB·계정은 `sh data/mysql/temporal-db-setup.sh`, 계정 temporal/TEMPORAL_DB_PASSWORD) |
+| mysql-platform-replica | STS | mysql:8.0.32 | :3306 | 1Gi | 384Mi / 768Mi | 레플리카(읽기, server-id 25, super_read_only). 복제·읽기 계정 platform_ro 는 `sh data/mysql/replica-setup.sh platform`(PLATFORM_REPL/RO_PASSWORD). deploy-service 의 이력 목록 조회가 여기로 |
 | mysql-commerce(-replica) | STS ×2 | mysql:8.0.44 | :3306 | 2Gi | 384Mi / 768Mi |
 | redis | STS | redis:7.2.4-alpine | :6379 | 256Mi | 32Mi / 128Mi |
 | redis-node-1..6 | STS ×6 + Job `redis-cluster-init` | redis:7.4.11-alpine | :6379, :16379 | 256Mi | 32Mi / 128Mi |
@@ -211,6 +212,8 @@ Redis 클러스터와 Kafka 는 port-forward 로는 못 쓴다(노드·브로커
 | mongo-01..03 | STS ×3 | mongo:7.0.8 | :27017 | 2Gi | 256Mi / 768Mi |
 | (minio) | — | 2026-10-05 Ceph RGW 로 교체(k8s/ceph, 네임스페이스 rook-ceph) | | | |
 | rabbitmq | STS | rabbitmq:3.12.4-management | :5672, :15672, :25672, :15692 | 512Mi | 128Mi / 384Mi |
+| temporal | Deploy | temporalio/server:1.32.2 (+ initContainer admin-tools: 스키마) | :7233 gRPC, :8000 metrics | — | 256Mi / 768Mi | Temporal 서버(단일 프로세스, 2026-11-14). 저장소 = mysql-platform 의 `temporal`·`temporal_visibility`. dynamic config 는 ConfigMap `temporal-dynamicconfig`(없으면 기동 불가). 네임스페이스 platform·messenger·commerce 는 Job `temporal-namespaces`. CLI 는 `kubectl -n modu run temporal-cli --rm -i --restart=Never --image=temporalio/admin-tools:1.32.2 --command -- temporal …` |
+| temporal-ui | Deploy | temporalio/ui:2.58.1 | :8080 | — | 16Mi / 128Mi | Temporal Web UI — 인증 없음, 맥 **127.0.0.1:8233** 전용(터널·LAN 금지) |
 | opensearch | STS | opensearchproject/opensearch:3.3.2 | :9200 | 5Gi | 1.5Gi / 1.5Gi |
 | opensearch-dashboards | Deploy | opensearchproject/opensearch-dashboards:3.3.0 | :5601 | — | 256Mi / 768Mi |
 | otel-collector | DaemonSet | otel/opentelemetry-collector-contrib:0.141.0 | — | — | 64Mi / 256Mi |
@@ -263,6 +266,7 @@ kubectl -n modu logs job/redis-cluster-init        # "creating cluster" … 또�
 kubectl -n modu exec redis-node-1-0 -- redis-cli cluster info | head -3
 # 4) 빈 데이터로 시작했다면: mongo replica set, MySQL 복제, gh-ost 계정
 kubectl -n modu exec mongo-01-0 -- bash /scripts/rs-init.sh
+sh ../data/mysql/temporal-db-setup.sh            # Temporal DB 두 개·계정(mysql-platform 이 뜬 뒤, replica-setup 전) — 표는 Temporal 이 만든다
 sh ../data/mysql/replica-setup.sh all            # 소스 → 레플리카 GTID 복제 + repl·읽기 계정
 sh ../data/mysql/ghost-user-setup.sh             # gh-ost 계정 ghost
 ```

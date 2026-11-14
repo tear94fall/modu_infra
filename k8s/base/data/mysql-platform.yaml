@@ -83,10 +83,11 @@ spec:
           failureThreshold: 6
         resources:
           requests:
-            memory: 256Mi
+            memory: 384Mi
             cpu: 50m
+          # 2026-11-14 512Mi 에서 OOM-kill: Temporal(스키마 temporal·temporal_visibility, 풀 5 라도 서비스 4개 × 풀 ≈ 커넥션 20개 상주)이 붙자 넘쳤다. 평시 anon ~470Mi(buffer pool 128M + 커넥션 ~40).
           limits:
-            memory: 512Mi
+            memory: 768Mi
         volumeMounts:
         - name: data
           mountPath: "/var/lib/mysql"
@@ -191,10 +192,11 @@ spec:
           failureThreshold: 6
         resources:
           requests:
-            memory: 256Mi
+            memory: 384Mi
             cpu: 50m
+          # 2026-11-14 소스와 같이 768Mi 로: Temporal 의 하트비트·큐 쓰기가 복제로 그대로 들어와 anon 이 512Mi limit 에 붙었다(과거 OOM 재시작 8회).
           limits:
-            memory: 512Mi
+            memory: 768Mi
         volumeMounts:
         - name: data
           mountPath: "/var/lib/mysql"

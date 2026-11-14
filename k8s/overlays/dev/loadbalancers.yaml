@@ -198,3 +198,37 @@ spec:
   - name: management
     port: 15672
     targetPort: management
+---
+# Temporal Web UI — 맥 127.0.0.1 전용(colima-ports.sh LOCAL_PORTS). 인증 없음 → 터널·LAN 금지(Argo CD UI 와 같은 등급). 2026-11-14
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui-lb
+  labels:
+    app: temporal-ui
+    app.kubernetes.io/name: temporal-ui
+spec:
+  type: LoadBalancer
+  selector:
+    app: temporal-ui
+  ports:
+  - name: http
+    port: 8233
+    targetPort: http
+---
+# Temporal gRPC — 맥에서 서비스(워커)를 로컬로 띄우거나 temporal CLI 를 쓸 때. 127.0.0.1 전용.
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-lb
+  labels:
+    app: temporal
+    app.kubernetes.io/name: temporal
+spec:
+  type: LoadBalancer
+  selector:
+    app: temporal
+  ports:
+  - name: grpc
+    port: 7233
+    targetPort: grpc

@@ -1,0 +1,304 @@
+# Temporal 서버(2026-11-14). durable execution 엔진 — 배포 플로우·회원 탈퇴·주문 사가가 차례로 올라탈 자리(docs/superpowers/specs/2026-11-14-temporal-server-design.md).
+# dev 는 단일 프로세스(frontend·history·matching·worker 한 파드) + 기존 mysql-platform 의 스키마 두 개(temporal, temporal_visibility).
+#
+#   temporal                Deployment ×1  temporalio/server  — gRPC 7233, Prometheus 8000. 설정은 환경변수(이미지의 내장 템플릿) + dynamic config ConfigMap.
+#     initContainer schema  temporalio/admin-tools  — temporal-sql-tool 로 스키마 생성·업그레이드(멱등). 서버 이미지를 올리면 여기서 스키마도 따라 올라간다.
+#   temporal-ui             Deployment ×1  temporalio/ui — 8080. 인증 없음 → 맥 127.0.0.1:8233 전용(overlays/dev, colima-ports.sh LOCAL_PORTS). 터널·LAN 금지.
+#   temporal-namespaces     Job            네임스페이스 platform·messenger·commerce(config-repo 의 제품 구분, 보존 30일)
+#
+# DB·계정은 DBA 가 만든다: sh data/mysql/temporal-db-setup.sh (Secret infra TEMPORAL_DB_PASSWORD). 표는 Temporal 도구가 관리 — 기준선·gh-ost 대상 아님(DBA.md).
+# 레플리카에는 복제로 따라간다(replica-setup.sh platform 의 덤프 목록에 두 스키마 포함).
+#
+# 함정(2026-11-14 로컬 docker 로 확인):
+# - dynamic config 파일(/etc/temporal/config/dynamicconfig/docker.yaml)이 없으면 서버가 "unable to validate dynamic config … no such file" 로 기동하지 않는다 → ConfigMap 마운트.
+# - NUM_HISTORY_SHARDS 는 DB 를 만든 뒤 바꿀 수 없다. 4 는 dev 값 — 운영은 새 DB 에 512 이상으로 시작한다.
+# - 커넥션 풀은 전부 5(SQL_MAX_CONNS·SQL_MAX_IDLE_CONNS·SQL_VIS_MAX_CONNS·SQL_VIS_MAX_IDLE_CONNS, 기본 20/20/10/10). 단일 프로세스라도 서비스 4개가 각자 풀을 들어
+#   **풀 5 → 상주 약 20개**. 처음 10/10 으로 올렸을 때 30개가 붙어 mysql-platform limits 512Mi 를 넘겨 OOM-kill 됐다(2026-11-14, deploy-service·batch-service 의 DB).
+#   풀을 줄이고 mysql-platform 소스·레플리카 limits 를 768Mi 로 올렸다.
+# - 서버 이미지에는 temporal CLI 가 없다(temporal-server 만). CLI 는 admin-tools: kubectl -n modu run temporal-cli --rm -i --restart=Never --image=temporalio/admin-tools:1.32.2 --command -- temporal …
+# - TEMPORAL_ALLOW_NO_AUTH=true: 인증 없이 돈다는 선언(없으면 경고, 다음 버전부터 필수). dev 는 클러스터 안 + 맥 루프백만.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-dynamicconfig
+  labels:
+    app: temporal
+    app.kubernetes.io/name: temporal-dynamicconfig
+    app.kubernetes.io/component: data
+data:
+  docker.yaml: |
+    # Temporal dynamic config (dev). 비어 있어도 되지만 파일이 없으면 서버가 기동하지 않는다.
+    limit.maxIDLength:
+      - value: 255
+        constraints: {}
+    # 검색 속성을 바로 반영(dev 편의). 운영에선 빼라 — 읽기마다 캐시를 새로 고친다.
+    system.forceSearchAttributesCacheRefreshOnRead:
+      - value: true
+        constraints: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal
+  labels:
+    app: temporal
+    app.kubernetes.io/name: temporal
+    app.kubernetes.io/component: data
+spec:
+  replicas: 1
+  # 두 개가 겹치면 안 된다: 단일 프로세스 멤버십(샤드 소유)과 initContainer 의 스키마 작업. 롤아웃 때 잠깐 끊긴다(dev 허용).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: temporal
+  template:
+    metadata:
+      labels:
+        app: temporal
+        app.kubernetes.io/name: temporal
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      initContainers:
+      - name: schema
+        image: temporalio/admin-tools:1.32.2
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: SQL_PASSWORD   # temporal-sql-tool 의 --pw 를 env 로(명령줄 인자로 넘기면 파드 ps 에 보인다 — replica-setup.sh 와 같은 규칙)
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: TEMPORAL_DB_PASSWORD
+        command:
+        - sh
+        - "-ec"
+        - |
+          # setup-schema -v 0.0 은 이미 초기화된 DB 에선 no-op(버전 유지), update-schema 는 모자란 버전만 적용 — 2026-11-14 로컬 확인. 두 번 돌려도 안전.
+          deadline=$(( $(date +%s) + 300 ))
+          until nc -z mysql-platform 3306; do
+            [ "$(date +%s)" -lt "$deadline" ] || { echo "mysql-platform 이 300초 안에 안 뜸" >&2; exit 1; }
+            sleep 2
+          done
+          T="temporal-sql-tool --plugin mysql8 --ep mysql-platform -p 3306 -u temporal"
+          $T --db temporal            setup-schema -v 0.0
+          $T --db temporal            update-schema -d /etc/temporal/schema/mysql/v8/temporal/versioned
+          $T --db temporal_visibility setup-schema -v 0.0
+          $T --db temporal_visibility update-schema -d /etc/temporal/schema/mysql/v8/visibility/versioned
+        resources:
+          requests:
+            memory: 32Mi
+          limits:
+            memory: 128Mi
+      containers:
+      - name: temporal
+        image: temporalio/server:1.32.2
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: DB
+          value: mysql8
+        - name: MYSQL_SEEDS
+          value: mysql-platform
+        - name: DB_PORT
+          value: "3306"
+        - name: MYSQL_USER
+          value: temporal
+        - name: MYSQL_PWD
+          valueFrom:
+            secretKeyRef:
+              name: infra
+              key: TEMPORAL_DB_PASSWORD
+        - name: DBNAME
+          value: temporal
+        - name: VISIBILITY_DBNAME
+          value: temporal_visibility
+        - name: SQL_MAX_CONNS
+          value: "5"
+        - name: SQL_MAX_IDLE_CONNS
+          value: "5"
+        - name: SQL_VIS_MAX_CONNS
+          value: "5"
+        - name: SQL_VIS_MAX_IDLE_CONNS
+          value: "5"
+        - name: NUM_HISTORY_SHARDS
+          value: "4"
+        - name: BIND_ON_IP
+          value: 0.0.0.0
+        - name: TEMPORAL_BROADCAST_ADDRESS   # 0.0.0.0 에 바인드하면 멤버십에 광고할 주소가 따로 필요하다 — 파드 IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: PROMETHEUS_ENDPOINT
+          value: 0.0.0.0:8000
+        - name: LOG_LEVEL
+          value: info
+        - name: TEMPORAL_ALLOW_NO_AUTH
+          value: "true"
+        ports:
+        - name: grpc
+          containerPort: 7233
+        - name: metrics
+          containerPort: 8000
+        volumeMounts:
+        - name: dynamicconfig
+          mountPath: /etc/temporal/config/dynamicconfig
+          readOnly: true
+        # 스키마를 못 찾으면 기동 자체가 실패하므로 TCP 프로브로 충분하다(헬스 RPC 는 Job·검증에서 CLI 로).
+        startupProbe:
+          tcpSocket:
+            port: grpc
+          periodSeconds: 5
+          failureThreshold: 24
+        readinessProbe:
+          tcpSocket:
+            port: grpc
+          periodSeconds: 10
+          failureThreshold: 3
+        livenessProbe:
+          tcpSocket:
+            port: grpc
+          periodSeconds: 20
+          failureThreshold: 6
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            memory: 768Mi
+      volumes:
+      - name: dynamicconfig
+        configMap:
+          name: temporal-dynamicconfig
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+  labels:
+    app: temporal
+    app.kubernetes.io/name: temporal
+    app.kubernetes.io/component: data
+spec:
+  selector:
+    app: temporal
+  ports:
+  - name: grpc
+    port: 7233
+    targetPort: grpc
+  - name: metrics
+    port: 8000
+    targetPort: metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+  labels:
+    app: temporal-ui
+    app.kubernetes.io/name: temporal-ui
+    app.kubernetes.io/component: data
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-ui
+  template:
+    metadata:
+      labels:
+        app: temporal-ui
+        app.kubernetes.io/name: temporal-ui
+        app.kubernetes.io/component: data
+    spec:
+      enableServiceLinks: false
+      containers:
+      - name: ui
+        image: temporalio/ui:2.58.1
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: TEMPORAL_ADDRESS
+          value: temporal:7233
+        - name: TEMPORAL_UI_PORT
+          value: "8080"
+        - name: TEMPORAL_CORS_ORIGINS
+          value: http://localhost:8233
+        ports:
+        - name: http
+          containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /
+            port: http
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 10m
+            memory: 16Mi
+          limits:
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  labels:
+    app: temporal-ui
+    app.kubernetes.io/name: temporal-ui
+    app.kubernetes.io/component: data
+spec:
+  selector:
+    app: temporal-ui
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+---
+# 네임스페이스 생성. 완료된 Job 은 Argo 가 /spec 을 비교하지 않는다(cicd/argocd/applications.yaml). 네임스페이스를 더 만들 땐 Job 이름을 바꿔(접미사) 새 Job 으로.
+# create 는 이미 있으면 오류 메시지만 내고 종료 코드가 일정치 않아 describe 로 먼저 확인한다(2026-11-14 확인).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: temporal-namespaces
+  labels:
+    app: temporal-namespaces
+    app.kubernetes.io/name: temporal-namespaces
+    app.kubernetes.io/component: data
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: temporal-namespaces
+        app.kubernetes.io/name: temporal-namespaces
+        app.kubernetes.io/component: data
+    spec:
+      restartPolicy: OnFailure
+      enableServiceLinks: false
+      containers:
+      - name: namespaces
+        image: temporalio/admin-tools:1.32.2
+        imagePullPolicy: IfNotPresent
+        command:
+        - sh
+        - "-ec"
+        - |
+          A="--address temporal:7233"
+          deadline=$(( $(date +%s) + 300 ))
+          until temporal operator cluster health $A 2>/dev/null | grep -q SERVING; do
+            [ "$(date +%s)" -lt "$deadline" ] || { echo "temporal 이 300초 안에 SERVING 이 아님" >&2; exit 1; }
+            sleep 3
+          done
+          for ns in platform messenger commerce; do
+            if temporal operator namespace describe $A --namespace "$ns" >/dev/null 2>&1; then
+              echo "namespace $ns exists"
+            else
+              temporal operator namespace create $A --namespace "$ns" --retention 720h && echo "namespace $ns created"
+            fi
+          done
+          temporal operator namespace list $A | grep -E 'NamespaceInfo.Name'
+        resources:
+          requests:
+            memory: 16Mi
+          limits:
+            memory: 64Mi
