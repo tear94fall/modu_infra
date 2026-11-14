@@ -89,6 +89,7 @@ CREATE TABLE `deployment` (
   `created_at` datetime(6) NOT NULL,
   `updated_at` datetime(6) NOT NULL,
   `running_service` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci GENERATED ALWAYS AS ((case when (`status` = _utf8mb4'RUNNING') then `service` end)) STORED,
+  `workflow_run_id` varchar(64) DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_deployment_running_service` (`running_service`),
   KEY `idx_deployment_service_started` (`service`,`started_at` DESC),

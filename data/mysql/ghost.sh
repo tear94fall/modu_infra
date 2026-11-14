@@ -2,7 +2,7 @@
 # gh-ost 로 테이블을 온라인으로 바꾼다. k8s(네임스페이스 modu)의 일회용 파드(kubectl run --rm)로 돈다. 절차와 원칙은 DBA.md.
 #
 #   sh data/mysql/ghost.sh <instance> <schema> <table> "<ALTER 본문>" [--execute] [--auto-cutover]     (NS=modu 기본)
-#     instance: member | chat | push | profile | commerce   (레플리카 Service mysql-<instance>-replica 에 붙는다)
+#     instance: member | chat | push | profile | commerce | platform   (레플리카 Service mysql-<instance>-replica 에 붙는다)
 #     예) sh data/mysql/ghost.sh commerce commerce orders "ADD COLUMN gift_message VARCHAR(200) NULL"
 #         sh data/mysql/ghost.sh commerce commerce orders "ADD COLUMN gift_message VARCHAR(200) NULL" --execute
 #
@@ -38,8 +38,8 @@ for a in "$@"; do
 done
 
 case "$INSTANCE" in
-  member|chat|push|profile|commerce) ;;
-  *) echo "instance 는 member|chat|push|profile|commerce" >&2; exit 2 ;;
+  member|chat|push|profile|commerce|platform) ;;
+  *) echo "instance 는 member|chat|push|profile|commerce|platform" >&2; exit 2 ;;
 esac
 REPLICA="mysql-${INSTANCE}-replica"
 IMAGE=modu-gh-ost:1.1.11
