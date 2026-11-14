@@ -132,10 +132,12 @@ spec:
           timeoutSeconds: 3
         resources:
           requests:
-            memory: 256Mi
+            memory: 384Mi
             cpu: 100m
+          # 2026-11-15: 배포가 Temporal 워크플로(modu_platform #43)가 되며 SDK(gRPC·워커 스레드·Jackson 2)가 붙어 working set 591Mi 로 640Mi 한도에 붙었다
+          # (JVM heap 108 + nonheap 249, MaxRAMPercentage 75). 768Mi 로 올린다.
           limits:
-            memory: 640Mi
+            memory: 768Mi
 ---
 apiVersion: v1
 kind: Service
