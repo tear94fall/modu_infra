@@ -1,0 +1,25 @@
+# Argo Rollouts(프로그레시브 딜리버리 컨트롤러) — 네임스페이스 argo-rollouts. 2026-11-15, 배포 탭의 카나리 배포용.
+#   설치:  kubectl apply --server-side -k k8s/cicd/argo-rollouts   (CRD 가 580KB 라 client-side apply 의 annotation 한도를 넘는다 — Argo CD Application 도 ServerSideApply)
+#   앱 Deployment 18개는 같은 이름의 Rollout(workloadRef) 이 파드를 가진다(base/*/*.yaml). 단계는 k8s/rollouts/steps.sh 가 파드 수에서 만들고 check.sh 가 검사한다.
+#   대시보드·kubectl 플러그인은 설치하지 않는다 — 진행/중단은 모두 시스템 배포 탭(deploy-service 가 Rollout status 를 패치)으로.
+# 공식 install.yaml(버전 고정)에 dev 리소스 패치만 얹는다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: argo-rollouts
+
+resources:
+  - namespace.yaml
+  - https://github.com/argoproj/argo-rollouts/releases/download/v1.10.2/install.yaml
+
+patches:
+  - target: {kind: Deployment, name: argo-rollouts}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 50m, memory: 128Mi}
+          limits: {memory: 256Mi}
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent

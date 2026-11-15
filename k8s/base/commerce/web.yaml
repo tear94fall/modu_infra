@@ -7,7 +7,8 @@ metadata:
     app.kubernetes.io/name: modu-commerce-web
     app.kubernetes.io/component: commerce
 spec:
-  replicas: 1
+  # 파드는 같은 이름의 Rollout(아래, workloadRef)이 가진다 — 이 Deployment 는 파드 템플릿(이미지 태그·env·프로브)만 담는다. 2026-11-15 카나리 배포.
+  replicas: 0
   selector:
     matchLabels:
       app: modu-commerce-web
@@ -80,3 +81,30 @@ spec:
   - name: http
     port: 80
     targetPort: http
+---
+# Rollout(Argo Rollouts): 위 Deployment 를 파드 템플릿으로 참조(workloadRef)해 파드 1개를 굴린다. 배포 탭이 Deployment 의 이미지 태그를 바꾸면(kustomize images + Argo Sync)
+# 컨트롤러가 새 ReplicaSet 을 띄운다. 단계(steps)는 파드 수에서 k8s/rollouts/steps.sh 가 만든 것 — replicas 를 바꾸면 steps 도 다시 만들고 rollouts/check.sh 로 확인.
+# 단계가 비어 있으면 지금의 롤링(maxSurge 1, maxUnavailable 0)과 같다. 진행/중단은 deploy-service 가 status 를 패치한다(모두 시스템 배포 탭).
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: modu-commerce-web
+  labels:
+    app: modu-commerce-web
+    app.kubernetes.io/name: modu-commerce-web
+    app.kubernetes.io/component: commerce
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: modu-commerce-web
+  workloadRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: modu-commerce-web
+    scaleDown: onsuccess
+  strategy:
+    canary:
+      maxSurge: 1
+      maxUnavailable: 0
+      steps: []

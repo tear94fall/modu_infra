@@ -45,6 +45,10 @@ Mac 에서 들어가는 포트(LoadBalancer): 게이트웨이 8000 · 콘솔 808
 - 모든 앱 로그 줄에 MDC 가 붙습니다: `requestId`(게이트웨이가 `X-Request-Id` 로 발급·전파), `userId`, `service`, Pinpoint `PtxId`/`PspanId`. 한 요청을 따라가려면 `attributes.requestId:<id>` 로 검색합니다. `PtxId` 로는 Pinpoint 의 호출 트리와 맞춰 볼 수 있습니다.
 - 접근 로그: 모든 서비스가 `event:http.access`(method, path, status, durationMs) 한 줄. 커머스는 `event:api.access` 로 요청·응답 헤더·본문(민감 헤더 마스킹, 4KB 까지)까지 남깁니다.
 
+## 카나리 배포 (Argo Rollouts, 2026-11-15)
+
+앱 18개는 Rollout(`workloadRef`)이 파드를 가진다. 단계는 파드 수에서 생성(`k8s/rollouts/steps.sh`), 검사는 `k8s/rollouts/check.sh`, 진행/중단은 모두 시스템 배포 탭. `k8s/rollouts/README.md`.
+
 ## 스키마 관리
 
 MySQL 스키마는 애플리케이션이 아니라 DBA 가 gh-ost 로 바꿉니다(서비스는 `ddl-auto: validate`). 기준선·변경 이력·절차는 `data/mysql/` 에 있습니다.

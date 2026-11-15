@@ -3,6 +3,7 @@
 #
 # modu-dev          modu_infra main  k8s/overlays/dev  → 앱 + 인프라 전부(네임스페이스 modu). JVM Deployment 는 sync-wave 로 하나씩 롤아웃.
 # modu-ceph         modu_infra main  k8s/ceph          → Rook 오퍼레이터 + Ceph 클러스터 + RGW(네임스페이스 rook-ceph). CRD 는 server-side apply.
+# modu-rollouts     modu_infra main  k8s/cicd/argo-rollouts → Argo Rollouts 컨트롤러 + CRD(네임스페이스 argo-rollouts). CRD 가 커서 server-side apply. 2026-11-15.
 # modu-config-repo  modu_platform develop  루트 kustomization → config-repo ConfigMap 3개(config-repo-root·messenger·commerce).
 #                   Sync 뒤 config-service 는 다시 띄워야 반영(kubectl -n modu rollout restart deploy/config-service).
 apiVersion: argoproj.io/v1alpha1
@@ -73,3 +74,23 @@ spec:
       kind: CephCluster
       jsonPointers:
         - /spec/storage/nodes
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: modu-rollouts
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tear94fall/modu_infra.git
+    targetRevision: main
+    path: k8s/cicd/argo-rollouts
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argo-rollouts
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true      # CRD 580KB — client-side apply 의 annotation 한도(256KB) 를 넘는다
+      - ApplyOutOfSyncOnly=true
+      - PruneLast=true

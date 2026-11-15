@@ -55,45 +55,10 @@ images:
   - name: ghcr.io/tear94fall/modu-admin/modu-internal
     newTag: develop-9f351bf  # 움직이는 태그(develop)는 imagePullPolicy IfNotPresent 때문에 노드의 옛 이미지가 쓰인다 — 항상 커밋 태그로
 
-# 복제 수. 1 노드라 gateway·config 만 2(롤링 재배포 때 끊기지 않게), 나머지는 1.
+# 복제 수. 앱 18개의 파드 수는 Rollout(spec.replicas, base 에서 1 — config·gateway 는 2)이 가진다(2026-11-15). dev 는 아래 patches 로 config·gateway 를 1 로.
+# 여기 replicas: 에는 Rollout 이 아닌 것만 남는다. Deployment 는 base 에서 replicas 0(템플릿) — 여기서 1 로 되돌리면 파드가 둘로 뜬다.
 # 메모리 requests 합(JVM 14개×512Mi + nginx 4개×16Mi ≈ 7.1GiB)이 노드 allocatable 을 넘으면 Pending 이 된다 — Docker Desktop 메모리를 확인(README).
 replicas:
-  - name: config-service
-    count: 1
-  - name: gateway-service
-    count: 1
-  - name: deploy-service
-    count: 1
-  - name: batch-service
-    count: 1
-  - name: auth-service
-    count: 1
-  - name: member-service
-    count: 1
-  - name: chat-service
-    count: 1
-  - name: chat-store-service
-    count: 1
-  - name: ws-service
-    count: 1
-  - name: push-service
-    count: 1
-  - name: storage-service
-    count: 1
-  - name: profile-service
-    count: 1
-  - name: point-service
-    count: 1
-  - name: commerce-service
-    count: 1
-  - name: modu-commerce-web
-    count: 1
-  - name: modu-admin
-    count: 1
-  - name: modu-system
-    count: 1
-  - name: modu-internal
-    count: 1
   # Pinpoint 스택 — dev 에선 꺼 둠(아래 patches 주석 참고). PVC(pinpoint-hbase-data, pinpoint-mysql)는 남아 있어 켜면 데이터가 이어진다.
   - name: zoo1
     count: 0
@@ -120,3 +85,22 @@ replicas:
 #    target:
 #      kind: Deployment
 #      name: "(storage|config)-service"
+
+# Rollout 파드 수(dev). 1 노드라 config·gateway 도 1. replicas 를 바꾸면 steps 도 k8s/rollouts/steps.sh 로 다시 만들고 rollouts/check.sh 로 확인.
+patches:
+  - target: {group: argoproj.io, kind: Rollout, name: config-service}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/strategy/canary/steps
+        value: []
+  - target: {group: argoproj.io, kind: Rollout, name: gateway-service}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/strategy/canary/steps
+        value: []
