@@ -43,7 +43,7 @@ images:
   - name: ghcr.io/tear94fall/modu-chat/profile-service
     newTag: develop-4e4400a
   - name: ghcr.io/tear94fall/modu-chat/point-service
-    newTag: develop-4e4400a
+    newTag: develop-ffbe1f6
   - name: ghcr.io/tear94fall/modu-commerce/commerce-service
     newTag: develop-c61898d
   - name: ghcr.io/tear94fall/modu-commerce/web
