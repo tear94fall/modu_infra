@@ -27,6 +27,7 @@
 | `apply-baseline.sh <instance>` | **새 클러스터 전용**: 빈 소스 DB 에 기준선을 손으로 적용(표가 하나라도 있으면 건너뛴다). 앱은 `validate` 만 하고 init 스크립트도 없으니 새 DB 의 스키마는 이걸로 만든다 |
 | `ghost.sh` | gh-ost 실행 래퍼 — k8s 일회용 파드(`kubectl run --rm`) |
 | `ghost-user-setup.sh` | gh-ost 계정(`ghost`) 만들기 — 소스마다 한 번(platform 은 2026-11-14 deployment.workflow_run_id 때 처음 만들었다. `ghost.sh` 도 platform 을 받는다) |
+| (기록) `deployment.mode`·`canary_json` | 2026-11-15 카나리 배포 — `schema/changes/2026-11-16-deployment-canary.sql`, gh-ost platform |
 | `check-orphans.sh` | 고아 행 점검 실행(레플리카에서) |
 | `replica-setup.sh` | 소스 → 레플리카 GTID 복제 설정(루트 README "운영 스크립트") |
 | `gh-ost/Dockerfile`, `gh-ost/build-and-import.sh` | gh-ost 1.1.11 이미지(`modu-gh-ost:1.1.11`)를 만들어 k8s 노드에 넣는다 — ghost.sh 전에 한 번(노드를 새로 만들면 다시) |

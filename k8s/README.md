@@ -334,6 +334,12 @@ kubectl -n rook-ceph get secret rook-ceph-object-user-modu-storage-service -o js
 - **운영에선** loop 파일 대신 노드 디스크(`storage.devices`), MON 3·size 3, `priorityClassNames` 그대로. 매니페스트에서 바뀌는 건 그 줄들뿐이다.
 - Argo 는 CRD 를 server-side 로 적용한다(cephclusters CRD 가 300KB 라 client-side 한도 초과) — CRD 에 `argocd.argoproj.io/sync-options: ServerSideApply=true`. `CephCluster.spec.storage.nodes` 는 Rook 이 채우므로 비교 제외.
 
+## Argo Rollouts — 카나리 (2026-11-15 부터)
+
+앱 Deployment 18개는 같은 이름의 **Rollout**(`workloadRef`)이 파드를 가진다(Deployment 는 `replicas: 0` 템플릿). 컨트롤러는 `cicd/argo-rollouts`(Application `modu-rollouts`).
+단계는 파드 수에서 `rollouts/steps.sh` 가 만들고 `rollouts/check.sh` 로 검사한다. 진행/중단은 배포 탭(deploy-service 가 Rollout status 패치). 자세히는 `rollouts/README.md`.
+Argo CD 는 단계에서 멈춘 Rollout 을 Suspended 로 보인다(정상). **템플릿 변경은 배포 탭을 거친다** — 밖에서 바꾸면 파드 2개 이상 서비스가 기록 없이 멈춘다(서비스 행에서 푼다).
+
 ## Argo CD 로 배포 (2026-10-04 부터)
 
 dev 의 배포 주체는 **Argo CD**(`k8s/cicd/argocd`, 네임스페이스 `argocd`, v3.5.3)다. Git 이 진실이고 Argo 가 그걸 클러스터에 맞춘다. 모두의 시스템의 "배포 버튼"은 이 위에 얹는다(태그 커밋 + Sync 호출 — 후속).
