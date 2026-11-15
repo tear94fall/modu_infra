@@ -13,3 +13,9 @@
   서비스 표가 "멈춤(배포 기록 없음)" 으로 보여 주고 서비스 행의 진행/중단으로 푼다(git 은 사람이 되돌린다).
 - 전환 기록(2026-11-15 dev): 컨트롤러 → Rollout 을 서비스 2~3개씩 apply(Rollout 이 새 RS 를 띄우고 Healthy 가 되면 `scaleDown: onsuccess` 가 Deployment 를 0 으로). 서비스마다 파드 1회 교체.
   **Rollout 객체만** apply 해야 Deployment 의 현재 이미지(local-* 등)가 git 태그로 되돌아가지 않는다.
+
+## dev 에서 눌러 보기(point-service, 2026-11-15)
+
+dev 는 1 노드라 Rollout 대부분이 파드 1개(단계 없음 = 지금의 롤링). **point-service 만 2개**(`k8s/overlays/dev/kustomization.yaml` 의 Rollout 패치, steps `[setWeight 50, pause]`)여서 배포 탭의 "카나리 배포" 버튼이 켜진다 — 새 파드 1개가 50% 를 받고 멈추면 사람이 에러 로그를 보고 다음 단계/중단을 누른다.
+다른 서비스로 바꾸려면 패치 대상만 바꾸고 steps 는 `sh k8s/rollouts/steps.sh 2` 결과로, 마지막에 `sh k8s/rollouts/check.sh`. 파드 하나당 메모리 약 450Mi 가 더 든다(노드 ~86→88%).
+검증한 것(2026-11-15): 50% 대기 → 완료(SUCCEEDED), 50% 대기 → 중단(ABORTED, git 태그·Rollout 이전 태그 복귀), 대기 중 deploy-service 재시작 뒤 진행, 기록 없이 멈춘 Rollout(`kubectl set env` 로 템플릿만 바뀐 경우)의 진행/중단, 컨트롤러 메모리 39Mi.

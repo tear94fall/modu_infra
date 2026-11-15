@@ -87,7 +87,18 @@ replicas:
 #      name: "(storage|config)-service"
 
 # Rollout 파드 수(dev). 1 노드라 config·gateway 도 1. replicas 를 바꾸면 steps 도 k8s/rollouts/steps.sh 로 다시 만들고 rollouts/check.sh 로 확인.
+# point-service 만 2 — 카나리 배포(50% → 100%)를 dev 에서 눌러 보기 위해(2026-11-15, 사용자 결정). 메모리 +약 450Mi.
 patches:
+  - target: {group: argoproj.io, kind: Rollout, name: point-service}
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: replace
+        path: /spec/strategy/canary/steps
+        value:
+          - setWeight: 50
+          - pause: {}
   - target: {group: argoproj.io, kind: Rollout, name: config-service}
     patch: |-
       - op: replace
